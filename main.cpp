@@ -9,10 +9,12 @@ using namespace std;
 int main()
 {
     const char* path = "vm.dat";
-    
+    /* 第一次运行时需要初始化
     int check = initialize(path);
     cout<<"check: "<<check<<endl;
+    */
+    loadVirtualDisk(path);
+    root = inodeGet(0); // 获取根目录
     
-    //loadVirtualDisk(path);
     system("pause");
 }

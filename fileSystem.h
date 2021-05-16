@@ -37,8 +37,6 @@ bool logout = false;
 
 
 
-
-
 // 初始化+格式化磁盘, 只执行一次
 int initialize(const char* path)
 {
@@ -82,6 +80,37 @@ int initialize(const char* path)
     return NO_ERROR;
 }
 
+// 将指定盘块号的内容读取到对应数据结构中
+int blockRead(void* buffer, unsigned short int blockId, int offset, int size, int count = 1)
+{
+    long int blockPos = blockId*superBlock->blockSize + offset;
+    fseek(virtualDisk, blockPos, SEEK_SET);
+    int readSize = fread(buffer, size, count, virtualDisk);
+    if (readSize != count)
+    {
+        return ERROR_BLOCK_READ;
+    }
+    return NO_ERROR;
+}
+// 将数据写入盘块, 开始块号为blockId
+int blockWrite(void* buffer, unsigned short int blockId, int offset, int size, int count = 1)
+{
+    long int blockPos = blockId*superBlock->blockSize + offset;
+    fseek(virtualDisk, blockPos, SEEK_SET);
+    int writeSize = fwrite(buffer, size, count, virtualDisk);
+    fflush(virtualDisk);
+    if (writeSize != count)
+    {
+        return ERROR_BLOCK_WRITE;
+    }
+    return NO_ERROR;
+}
+// 释放
+int blockFree()
+{
+    cout<<"?"<<endl;
+}
+
 // 加载磁盘
 int loadVirtualDisk(const char* path)
 {
@@ -92,6 +121,26 @@ int loadVirtualDisk(const char* path)
     }
     superBlock = (struct SuperBlock*)calloc(1, sizeof(struct SuperBlock));
     fseek(virtualDisk, START, SEEK_SET);
+    int readSize = fread(superBlock, sizeof(struct SuperBlock), 1, virtualDisk);
+    if (readSize != 1)
+    {
+        return ERROR_LOAD_SUPER_FAIL;
+    }
+    
+    return NO_ERROR;
+}
+
+// 更新inode, 写入磁盘
+int updateInode(struct DiskInode* inode)
+{
+    int inodePos = superBlock->inodeStart*1024 + inode->inodeId*superBlock->diskInodeSize;
+    fseek(virtualDisk, inodePos, SEEK_SET);  // 定位到对应inode
+    int writeSize = fwrite(inode, sizeof(struct DiskInode), 1, virtualDisk);
+    fflush(virtualDisk);
+    if(writeSize != 1)
+    {
+        return ERROR_UPDATE_INODE_FAIL;
+    }
     return NO_ERROR;
 }
 
@@ -109,15 +158,19 @@ struct DiskInode* inodeGet(int inodeId)
     {
         return NULL;
     }
-    if (inodeArr[inodeId].createTime == 0)
+    if (inodeArr[inodeId].createTime == 0) // new file
     {
         inodeArr[inodeId].fileSize = 0;
         inodeArr[inodeId].inodeId = inodeId;
         time_t timer;
         time(&timer);
         inodeArr[inodeId].createTime = timer;
+        updateInode(&inodeArr[inodeId]);
     }
+    inodeArr[inodeId].inodeId = inodeId;
+    return &inodeArr[inodeId];
 }
+
 
 // 输入响应
 // 创建文件

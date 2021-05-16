@@ -30,55 +30,12 @@ struct DiskInode inodeArr[DISK_INODE_NUM];
 // 当前节点
 struct DiskInode* currInode;
 
+unsigned int inodeBitmap[256] = {0};
+unsigned int blockBitmap[512] = {0};
 
 
 // 退出
 bool logout = false;
-
-
-
-// 初始化+格式化磁盘, 只执行一次
-int initialize(const char* path)
-{
-    // 所有打开方式都是 "r+""
-    // 没有写入的
-    virtualDisk = fopen(path, "r+");
-    memset(buf, 0, sizeof(buf));
-    fwrite(buf, 1, TOTAL_SIZE, virtualDisk);
-    if (virtualDisk == NULL)
-    {
-        return ERROR_VM_NOEXIST;
-    }
-    // 格式化
-    // 写入superBlock
-    superBlock = (struct SuperBlock*)calloc(1, sizeof(struct SuperBlock));
-    fseek(virtualDisk, START, SEEK_SET);    // 找到盘块#1
-    superBlock->size = 16*1024*1024;
-    superBlock->start = START;
-    superBlock->fileDirStart = FILE_DIR_START;
-    superBlock->inodeBitmapStart = INODE_BITMAP_START;
-    superBlock->blockBitmapStart = BLOCK_BITMAP_START;
-    superBlock->inodeStart = INODE_START;
-    superBlock->blockStart = BLOCK_START;
-    superBlock->blockNum = BLOCK_NUM;
-    superBlock->blockSize = BLOCK_SIZE;
-    superBlock->diskInodeNum = DISK_INODE_NUM;
-    superBlock->diskInodeSize = DISK_INODE_SIZE;
-    fwrite(superBlock, sizeof(struct SuperBlock), 1, virtualDisk);
-    fflush(virtualDisk);
-
-    fclose(virtualDisk);
-
-    /* 测试输入
-    virtualDisk = fopen(path, "r+");
-    superBlock = (struct SuperBlock*)calloc(1, sizeof(struct SuperBlock));
-    fseek(virtualDisk, START, SEEK_SET);    // 找到盘块#1
-    int readSize = fread(superBlock, sizeof(struct SuperBlock), 1, virtualDisk);
-    cout<<"readSize: "<<readSize<<endl;
-    cout<<superBlock->size<<endl;
-    */
-    return NO_ERROR;
-}
 
 // 将指定盘块号的内容读取到对应数据结构中
 int blockRead(void* buffer, unsigned short int blockId, int offset, int size, int count = 1)
@@ -105,30 +62,65 @@ int blockWrite(void* buffer, unsigned short int blockId, int offset, int size, i
     }
     return NO_ERROR;
 }
-// 释放
+// 释放 未实现...
 int blockFree()
 {
     cout<<"?"<<endl;
 }
 
-// 加载磁盘
-int loadVirtualDisk(const char* path)
+// bitmap操作
+// 从磁盘中读取bitmap kind=0 为inode,kind=1 为block
+int bitmapRead(int kind)
 {
-    virtualDisk = fopen(path, "r+");
-    if(virtualDisk == NULL)
+    int bitmapPos;
+    if (kind == 0)   // inode
     {
-        return ERROR_VM_NOEXIST;
+        bitmapPos = superBlock->inodeBitmapStart*1024;
+        fseek(virtualDisk, bitmapPos, SEEK_SET);
+        int readSize = fread(inodeBitmap, sizeof(unsigned int), 256, virtualDisk);
+        if(readSize != 256)
+        {
+            return ERROR_READ_BITMAP;
+        }
     }
-    superBlock = (struct SuperBlock*)calloc(1, sizeof(struct SuperBlock));
-    fseek(virtualDisk, START, SEEK_SET);
-    int readSize = fread(superBlock, sizeof(struct SuperBlock), 1, virtualDisk);
-    if (readSize != 1)
+    else if(kind == 1)   // block
     {
-        return ERROR_LOAD_SUPER_FAIL;
+        bitmapPos = superBlock->blockBitmapStart*1024;
+        fseek(virtualDisk, bitmapPos, SEEK_SET);
+        int readSize = fread(blockBitmap, sizeof(unsigned int), 512, virtualDisk);
+        if (readSize != 512)
+        {
+            return ERROR_READ_BITMAP;
+        }
     }
-    
     return NO_ERROR;
 }
+int bitmapWrite(int kind)
+{
+    int bitmapPos;
+    if (kind == 0)   // inode
+    {
+        bitmapPos = superBlock->inodeBitmapStart*1024;
+        fseek(virtualDisk, bitmapPos, SEEK_SET);
+        int writeSize = fwrite(inodeBitmap, sizeof(unsigned int), 256, virtualDisk);
+        if(writeSize != 256)
+        {
+            return ERROR_WRITE_BITMAP;
+        }
+    }
+    else if(kind == 1)   // block
+    {
+        bitmapPos = superBlock->blockBitmapStart*1024;
+        fseek(virtualDisk, bitmapPos, SEEK_SET);
+        int writeSize = fread(blockBitmap, sizeof(unsigned int), 512, virtualDisk);
+        if (writeSize != 512)
+        {
+            return ERROR_WRITE_BITMAP;
+        }
+    }
+    return NO_ERROR;
+}
+
 
 // 更新inode, 写入磁盘
 int updateInode(struct DiskInode* inode)
@@ -170,6 +162,90 @@ struct DiskInode* inodeGet(int inodeId)
     inodeArr[inodeId].inodeId = inodeId;
     return &inodeArr[inodeId];
 }
+
+// 初始化+格式化磁盘, 只执行一次
+int initialize(const char* path)
+{
+    // 所有打开方式都是 "r+""
+    // 没有写入的
+    virtualDisk = fopen(path, "r+");
+    memset(buf, 0, sizeof(buf));
+    fwrite(buf, 1, TOTAL_SIZE, virtualDisk);
+    if (virtualDisk == NULL)
+    {
+        return ERROR_VM_NOEXIST;
+    }
+    // 格式化
+    // superBlock初始化
+    superBlock = (struct SuperBlock*)calloc(1, sizeof(struct SuperBlock));
+    superBlock->size = 16*1024*1024;
+    superBlock->start = START;
+    superBlock->fileDirStart = FILE_DIR_START;
+    superBlock->inodeBitmapStart = INODE_BITMAP_START;
+    superBlock->blockBitmapStart = BLOCK_BITMAP_START;
+    superBlock->inodeStart = INODE_START;
+    superBlock->blockStart = BLOCK_START;
+    superBlock->blockNum = BLOCK_NUM;
+    superBlock->blockSize = BLOCK_SIZE;
+    superBlock->diskInodeNum = DISK_INODE_NUM;
+    superBlock->diskInodeSize = DISK_INODE_SIZE;
+    blockWrite(superBlock, superBlock->start, 0, sizeof(struct SuperBlock), 1);
+    fflush(virtualDisk);
+
+    // root初始化
+    root = (struct DiskInode*)calloc(1, sizeof(DiskInode));
+    root->fileSize = 0;
+    root->inodeId = 0;
+    time_t timer;
+    time(&timer);
+    root->createTime = timer;
+    updateInode(root);   // 写入磁盘
+    
+    // 文件目录初始化
+    currFileDir = (struct FileDirectory*)calloc(1, sizeof(FileDirectory));
+    currFileDir->directoryNum = 1; // 只有根目录
+    char str[] = "/";
+    strncpy(currFileDirEntry.fileName, str, sizeof(currFileDirEntry.fileName));
+    currFileDirEntry.inodeId = 0; 
+    currFileDir->fileDirectoryEntry[0] = currFileDirEntry;
+
+    // Bitmap初始化
+
+
+
+
+    /* 测试
+    int ans = blockRead(superBlock, superBlock->start, 0, sizeof(struct SuperBlock), 1);
+    cout<<superBlock->size<<endl;  // 16777216
+    cout<<ans<<endl;  // 1
+    */
+    fclose(virtualDisk);
+    return NO_ERROR;
+}
+
+
+// 加载磁盘
+int loadVirtualDisk(const char* path)
+{
+    virtualDisk = fopen(path, "r+");
+    if(virtualDisk == NULL)
+    {
+        return ERROR_VM_NOEXIST;
+    }
+    superBlock = (struct SuperBlock*)calloc(1, sizeof(struct SuperBlock));
+    fseek(virtualDisk, START, SEEK_SET);
+    int readSize = fread(superBlock, sizeof(struct SuperBlock), 1, virtualDisk);
+    if (readSize != 1)
+    {
+        return ERROR_LOAD_SUPER_FAIL;
+    }
+    // 读入文件目录表
+    currFileDir = (struct FileDirectory*)calloc(1, sizeof(struct FileDirectory));
+    blockRead(currFileDir, root->addr[0], 0, sizeof(struct FileDirectory));
+    return NO_ERROR;
+}
+
+
 
 
 // 输入响应

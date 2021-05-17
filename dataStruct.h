@@ -3,7 +3,7 @@
 // UpperCamelCase
 
 
-// 超级块 4*11+980 = 1024B
+// 超级块 4*13+972 = 1024B
 struct SuperBlock
 {
     unsigned int size;                     // 磁盘大小
@@ -17,7 +17,9 @@ struct SuperBlock
     unsigned int blockSize;                // 数据块大小
     unsigned int diskInodeNum;             // inode总数
     unsigned int diskInodeSize;            // inode大小
-    char fill[980];                       // 填充
+    unsigned int freeInode;                // 剩余可分配inode数
+    unsigned int freeBlock;                // 剩余可分配block数
+    char fill[976];                        // 填充
 };
 
 // 磁盘索引节点 64B

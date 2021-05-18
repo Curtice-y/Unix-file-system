@@ -22,15 +22,22 @@ struct SuperBlock
     char fill[976];                        // 填充
 };
 
-// 磁盘索引节点 64B
+// 地址 3B
+struct Address
+{
+    char ch[3];
+};
+
+// 磁盘索引节点 64B = 4B*5 + 3B*11 + 11B
 struct DiskInode
 {
     int type;              // 文件类型
     unsigned int inodeId;  // 索引节点id
     int fileSize;          // 文件大小 按字节
-    int addr[11];          // 物理地址 addr[0]~addr[9]是直接地址, addr[10]是间接地址
+    Address addr[11];      // 物理地址 addr[0]~addr[9]是直接地址, addr[10]是间接地址
     int createTime;        // 创建时间
     int modifyTime;        // 修改时间
+    char fill[11];         // 填充
 };
 
 // 文件目录项  32+1 = 33B
@@ -53,3 +60,4 @@ struct File
     DiskInode *diskInode;                  // 磁盘索引节点
     int f_curpos;                          // ???
 };
+

@@ -29,57 +29,43 @@ struct DiskInode* root;
 struct DiskInode inodeArr[DISK_INODE_NUM];
 // 当前节点
 struct DiskInode* currInode;
-
+// 两种bitmap
 unsigned int inodeBitmap[256] = {0};
 unsigned int blockBitmap[512] = {0};
-
 
 // 退出
 bool logout = false;
 
-// 将指定盘块号的内容读取到对应数据结构中
-int blockRead(void* buffer, unsigned short int blockId, int offset, int size, int count = 1)
+
+//------------------------------转换函数------------------------------
+
+unsigned int sizeToBlockNum(unsigned int size)
 {
-    long int blockPos = blockId*superBlock->blockSize + offset;
-    fseek(virtualDisk, blockPos, SEEK_SET);
-    int readSize = fread(buffer, size, count, virtualDisk);
-    if (readSize != count)
-    {
-        return ERROR_BLOCK_READ;
-    }
-    return NO_ERROR;
-}
-// 将数据写入盘块, 开始块号为blockId
-int blockWrite(void* buffer, unsigned short int blockId, int offset, int size, int count = 1)
-{
-    long int blockPos = blockId*superBlock->blockSize + offset;
-    fseek(virtualDisk, blockPos, SEEK_SET);
-    int writeSize = fwrite(buffer, size, count, virtualDisk);
-    fflush(virtualDisk);
-    if (writeSize != count)
-    {
-        return ERROR_BLOCK_WRITE;
-    }
-    return NO_ERROR;
-}
-// 释放 未实现...
-int blockFree()
-{
-    cout<<"?"<<endl;
+    return (unsigned int)(size/1024);
 }
 
-// 计算函数
-int sizeToBlock(int size)
+unsigned int getBlockIdFromAddress(struct Address* addr)
 {
-    return int(size/1024);
+    return (unsigned int)(addr->ch[0]*64 + addr->ch[1]/4);
+}
+
+struct Address getAddressFromBlockId(unsigned int blockId)
+{
+    Address addr;
+    addr.ch[2] = 0;
+    addr.ch[1] = (blockId*4)%256;
+    addr.ch[0] = (int)(blockId/64);
+    return addr;
 }
 
 
-// bitmap操作
+
+//------------------------------bitmap操作------------------------------
+
 // kind=0 为inode,kind=1 为block
 int bitmapRead(int kind)
 {
-    int bitmapPos;
+    unsigned int bitmapPos;
     if (kind == 0)   // inode
     {
         bitmapPos = superBlock->inodeBitmapStart*1024;
@@ -104,7 +90,7 @@ int bitmapRead(int kind)
 }
 int bitmapWrite(int kind)
 {
-    int bitmapPos;
+    unsigned int bitmapPos;
     if (kind == 0)   // inode
     {
         bitmapPos = superBlock->inodeBitmapStart*1024;
@@ -129,62 +115,135 @@ int bitmapWrite(int kind)
 }
 
 // 提取unsigned int 中pos位置的bit
-int getBitFromUint(unsigned int num,int pos)
+int getBitFromUint(unsigned int num,int leftPos)
 {
-    int lpos = 31 - pos;
-    for(int i=0;i<lpos;i++)
+    int rightPos = 31 - leftPos;
+    for(int i=0;i<=rightPos;i++)
     {
         num/=2;
     }
     return num%2;
 }
 
-// 判断inode是否被使用, 使用则返回True(1)
-int inodeInUse(int inodeId)
+// 设置unsigned int 中pos位置的bit 返回unsigned int
+unsigned int setBitFromUint(unsigned int num, int leftPos, int bit)
 {
-    bitmapRead(0);
-    int pos1 = (int)inodeId/32;   // 0~255
-    int pos2 = inodeId%32;        // 0~31
-    unsigned int num = inodeBitmap[pos1];
-    if (getBitFromUint(num, pos2) == 1)
+    unsigned int temp = 1;
+    int rightPos = 31 - leftPos;
+    for(int i=0;i<=rightPos;i++)
     {
-        return 1;
+        num/=2;
+        temp*=2;
     }
-    else return 0;
+    if(num%2 != bit)
+    {
+        if(num%2 == 1)
+        {
+            num-=temp;
+        }
+        else
+        {
+            num += temp;
+        }
+    }
+    return num;
 }
 
-// 只分配了inode, 没有分配磁盘空间
-int allocateInode(int inodeId)
+//------------------------------block相关------------------------------
+
+// 将指定盘块号的内容读取到对应数据结构中
+int blockRead(void* buffer, unsigned int blockId, int offset, int size, int count = 1)
 {
-    bitmapRead(0);
-    if (superBlock->freeInode == 0)
+    unsigned int blockPos = blockId*superBlock->blockSize + offset;
+    fseek(virtualDisk, blockPos, SEEK_SET);
+    int readSize = fread(buffer, size, count, virtualDisk);
+    if (readSize != count)
     {
-        return ERROR_INSUFFICIENT_FREE_INODE;
+        return ERROR_BLOCK_READ;
     }
-    if (inodeInUse(inodeId) == 1)
-    {
-        return ERROR_INODEID_ALREADY_IN_USE;
-    }
-    struct DiskInode* inode = inodeGet(inodeId);  // inodeGet 会自动分配id
-    updateInode(inode);  // 写入磁盘
-    superBlock->freeInode = superBlock->freeInode - 1;
-    bitmapWrite(0);
     return NO_ERROR;
 }
 
-int allocateBlock(int inodeId, int size)
+// 将数据写入盘块, 开始块号为blockId
+int blockWrite(void* buffer, unsigned int blockId, int offset, int size, int count = 1)
+{
+    unsigned int blockPos = blockId*superBlock->blockSize + offset;
+    fseek(virtualDisk, blockPos, SEEK_SET);
+    int writeSize = fwrite(buffer, size, count, virtualDisk);
+    fflush(virtualDisk);
+    if (writeSize != count)
+    {
+        return ERROR_BLOCK_WRITE;
+    }
+    return NO_ERROR;
+}
+
+// 释放
+int blockFree(unsigned int blockId)
+{
+    bitmapRead(1);
+    blockBitmap[blockId/32] = setBitFromUint(blockBitmap[blockId/32], blockId%32, 0);
+    bitmapWrite(1);
+}
+
+// 分配一块数据块 返回blockId  (未检验是否有空闲数据块)
+unsigned int allocateOneBlock()
+{
+    bool find = false;
+    unsigned int blockId;
+    for(int i=0;i<512;i++)
+    {
+        for(int j=0;j<31;j++)
+        {
+            if(getBitFromUint(blockBitmap[i], j) == 0)
+            {
+                find == true;
+                blockId = i*32 + j;
+            }
+            if(find == true)
+                break;
+        }
+        if(find == true)
+            break;
+    }
+}
+
+// 为inode对应文件分配block, 调用函数前需要设置inode的fileSize
+int allocateBlock(unsigned int inodeId)
 {
     bitmapRead(1);
     struct DiskInode* inode = inodeGet(inodeId);
-    if (sizeToBlock(inode->fileSize) > superBlock->freeBlock)
+    if (sizeToBlockNum(inode->fileSize) > superBlock->freeBlock - 1) // -1 是为了间址所使用的block
     {
         return ERROR_INSUFFICIENT_FREE_BLOCKS;
     }
+    int fileSize = inode->fileSize;
+    for(int i=0;i<min(fileSize, 10);i++)
+    {
+        inode->addr[i] = getAddressFromBlockId(allocateOneBlock());
+    }
+    fileSize-=10;
+    if (fileSize > 0)
+    {
+        unsigned int blockId = allocateOneBlock();
+        inode->addr[10] = getAddressFromBlockId(blockId);
+        struct Address* address = (struct Address*)calloc(1, sizeof(struct Address));
+        for(int i=0;i<fileSize;i++)
+        {
+            // 中间变量暂存, 因为临时变量不能取地址
+            Address temp = getAddressFromBlockId(allocateOneBlock());
+            address = &temp;
+            blockWrite(address, blockId, i*sizeof(struct Address), sizeof(struct Address), 1);
+        }
+    }
+    updateInode(inode);
     bitmapWrite(1);
     return NO_ERROR;
 }
 
 
+
+//------------------------------inode相关------------------------------
 
 // 更新inode, 写入磁盘
 int updateInode(struct DiskInode* inode)
@@ -201,7 +260,7 @@ int updateInode(struct DiskInode* inode)
 }
 
 // 通过inodeId获取DiskInode指针
-struct DiskInode* inodeGet(int inodeId)
+struct DiskInode* inodeGet(unsigned int inodeId)
 {
     if (virtualDisk == NULL)
     {
@@ -227,7 +286,43 @@ struct DiskInode* inodeGet(int inodeId)
     return &inodeArr[inodeId];
 }
 
-// 初始化+格式化磁盘, 只执行一次
+// 判断inode是否被使用, 使用则返回True(1)
+int inodeInUse(int inodeId)
+{
+    bitmapRead(0);
+    int pos1 = (int)inodeId/32;   // 0~255
+    int pos2 = inodeId%32;        // 0~31
+    if (getBitFromUint(inodeBitmap[pos1], pos2) == 1)
+    {
+        return 1;
+    }
+    else return 0;
+}
+
+// 只分配了inode, 没有分配磁盘空间
+int allocateInode(int inodeId)
+{
+    if(superBlock->freeInode == 0)
+    {
+        return ERROR_INSUFFICIENT_FREE_INODE;
+    }
+    if(inodeInUse(inodeId) == 1)
+    {
+        return ERROR_INODEID_ALREADY_IN_USE;
+    }
+    inodeBitmap[inodeId/32] = setBitFromUint(inodeBitmap[inodeId/32], inodeId%32, 1);  // 更新bitmap
+    struct DiskInode* inode = inodeGet(inodeId);  // inodeGet 会分配id
+    updateInode(inode);  // 写入磁盘
+    superBlock->freeInode = superBlock->freeInode - 1;
+    bitmapWrite(0);
+    return NO_ERROR;
+}
+
+
+
+//--------------------------------初始化--------------------------------
+
+// 初始化+格式化磁盘, 第一次运行程序的时候需执行, 之后执行加载磁盘
 int initialize(const char* path)
 {
     // 所有打开方式都是 "r+""
@@ -235,7 +330,7 @@ int initialize(const char* path)
     virtualDisk = fopen(path, "r+");
     memset(buf, 0, sizeof(buf));
     fwrite(buf, 1, TOTAL_SIZE, virtualDisk);
-    if (virtualDisk == NULL)
+    if(virtualDisk == NULL)
     {
         return ERROR_VM_NOEXIST;
     }
@@ -255,8 +350,8 @@ int initialize(const char* path)
     superBlock->diskInodeSize = DISK_INODE_SIZE;
     superBlock->freeInode = DISK_INODE_NUM - 1;
     superBlock->freeBlock = BLOCK_NUM;
+    fseek(virtualDisk, 0, SEEK_SET);
     blockWrite(superBlock, superBlock->start, 0, sizeof(struct SuperBlock), 1);
-    fflush(virtualDisk);
 
     // root初始化
     root = (struct DiskInode*)calloc(1, sizeof(DiskInode));
@@ -276,9 +371,11 @@ int initialize(const char* path)
     currFileDir->fileDirectoryEntry[0] = currFileDirEntry;
 
     // Bitmap初始化
-
-
-
+    for(int i=0; i<superBlock->blockStart; i++)
+    {
+        blockBitmap[i/32] = setBitFromUint(blockBitmap[i/32], i%32, 1);
+    }
+    bitmapWrite(1);
 
     /* 测试
     int ans = blockRead(superBlock, superBlock->start, 0, sizeof(struct SuperBlock), 1);
@@ -289,7 +386,6 @@ int initialize(const char* path)
     return NO_ERROR;
 }
 
-
 // 加载磁盘
 int loadVirtualDisk(const char* path)
 {
@@ -298,21 +394,29 @@ int loadVirtualDisk(const char* path)
     {
         return ERROR_VM_NOEXIST;
     }
+    // 读入superBlock
     superBlock = (struct SuperBlock*)calloc(1, sizeof(struct SuperBlock));
     fseek(virtualDisk, START, SEEK_SET);
     int readSize = fread(superBlock, sizeof(struct SuperBlock), 1, virtualDisk);
-    if (readSize != 1)
+    if(readSize != 1)
     {
         return ERROR_LOAD_SUPER_FAIL;
     }
     // 读入文件目录表
     currFileDir = (struct FileDirectory*)calloc(1, sizeof(struct FileDirectory));
-    blockRead(currFileDir, root->addr[0], 0, sizeof(struct FileDirectory));
+    blockRead(currFileDir, superBlock->fileDirStart, 0, sizeof(struct FileDirectory));
+    
+    // 读入bitmap
+    bitmapRead(0);
+    bitmapRead(1);
+
     return NO_ERROR;
 }
 
 
-// 输入响应
+
+//------------------------------输入的响应事件------------------------------
+
 // 创建文件
 int createFile()
 {

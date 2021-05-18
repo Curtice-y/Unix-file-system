@@ -18,6 +18,7 @@ int main()
 	}
     //loadVirtualDisk(path);
     //root = inodeGet(0); // 获取根目录
+    
     // login();
     system("pause");
 }

@@ -3,7 +3,7 @@
 // UpperCamelCase
 
 
-// 超级块 4*13+972 = 1024B
+// 超级块 4*14+968 = 1024B
 struct SuperBlock
 {
     unsigned int size;                     // 磁盘大小
@@ -16,10 +16,11 @@ struct SuperBlock
     unsigned int blockNum;                 // 数据块总数
     unsigned int blockSize;                // 数据块大小
     unsigned int diskInodeNum;             // inode总数
+    unsigned int fileInodeNum;             // 一个文件夹中inode最多的个数
     unsigned int diskInodeSize;            // inode大小
     unsigned int freeInode;                // 剩余可分配inode数
     unsigned int freeBlock;                // 剩余可分配block数
-    char fill[976];                        // 填充
+    char fill[968];                        // 填充
 };
 
 // 地址 3B
@@ -40,24 +41,19 @@ struct DiskInode
     char fill[11];         // 填充
 };
 
-// 文件目录项  32+1 = 33B
+// 文件目录项  32+4 = 36B
 struct FileDirectoryEntry
 {
     char fileName[MAX_FILE_NAME];          // 文件名
     unsigned int inodeId;                  // 索引节点编号
 };
 
-// 文件目录  max = 4*1024*33 + 1 B = 123 Blocks
+// 文件目录  max = 8 + 28*36(1004) + 12 = 1 Block
 struct FileDirectory
 {
-    int directoryNum;                                         // 目录数目
-    FileDirectoryEntry fileDirectoryEntry[DISK_INODE_NUM];    // 目录项数组
-};
-
-// 文件
-struct File
-{
-    DiskInode *diskInode;                  // 磁盘索引节点
-    int f_curpos;                          // ???
+    int fileDirNum;                                           // 包含的文件/目录数量
+    int fileDirectoryId;                                      // 文件目录Id
+    FileDirectoryEntry fileDirectoryEntry[FILE_INODE_NUM];    // 目录项数组
+    char fill[12];                                            // 填充
 };
 

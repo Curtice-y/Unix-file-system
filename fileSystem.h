@@ -3,6 +3,7 @@
 #include <fstream>
 #include <string.h>
 #include <time.h>
+#include<stdlib.h>
 
 
 #include "define.h"
@@ -44,9 +45,9 @@ unsigned int sizeToBlockNum(unsigned int size)
     return (unsigned int)(size/1024);
 }
 
-unsigned int getBlockIdFromAddress(struct Address* addr)
+unsigned int getBlockIdFromAddress(struct Address addr)
 {
-    return (unsigned int)(addr->ch[0]*64 + addr->ch[1]/4);
+    return (unsigned int)(addr.ch[0]*64 + addr.ch[1]/4);
 }
 
 struct Address getAddressFromBlockId(unsigned int blockId)
@@ -148,6 +149,81 @@ unsigned int setBitFromUint(unsigned int num, int leftPos, int bit)
     }
     return num;
 }
+//------------------------------inode相关------------------------------
+
+// 更新inode, 写入磁盘
+int updateInode(struct DiskInode* inode)
+{
+    int inodePos = superBlock->inodeStart*1024 + inode->inodeId*superBlock->diskInodeSize;
+    fseek(virtualDisk, inodePos, SEEK_SET);  // 定位到对应inode
+    int writeSize = fwrite(inode, sizeof(struct DiskInode), 1, virtualDisk);
+    fflush(virtualDisk);
+    if(writeSize != 1)
+    {
+        return ERROR_UPDATE_INODE_FAIL;
+    }
+    return NO_ERROR;
+}
+
+// 通过inodeId获取DiskInode指针
+struct DiskInode* inodeGet(unsigned int inodeId)
+{
+    if (virtualDisk == NULL)
+    {
+        return NULL;
+    }
+    int inodePos = INODE_START*1024 + inodeId*DISK_INODE_SIZE;
+    fseek(virtualDisk, inodePos, SEEK_SET); // 指针移到对应inode的位置
+    int readSize = fread(&inodeArr[inodeId], sizeof(struct DiskInode), 1, virtualDisk);
+    if (readSize != 1)
+    {
+        return NULL;
+    }
+    if (inodeArr[inodeId].createTime == 0) // new file
+    {
+        inodeArr[inodeId].fileSize = 0;
+        inodeArr[inodeId].inodeId = inodeId;
+        time_t timer;
+        time(&timer);
+        inodeArr[inodeId].createTime = timer;
+        updateInode(&inodeArr[inodeId]);
+    }
+    inodeArr[inodeId].inodeId = inodeId;
+    return &inodeArr[inodeId];
+}
+
+// 判断inode是否被使用, 使用则返回True(1)
+int inodeInUse(int inodeId)
+{
+    bitmapRead(0);
+    int pos1 = (int)inodeId/32;   // 0~255
+    int pos2 = inodeId%32;        // 0~31
+    if (getBitFromUint(inodeBitmap[pos1], pos2) == 1)
+    {
+        return 1;
+    }
+    else return 0;
+}
+
+// 只分配了inode, 没有分配磁盘空间
+int allocateInode(int inodeId)
+{
+    if(superBlock->freeInode == 0)
+    {
+        return ERROR_INSUFFICIENT_FREE_INODE;
+    }
+    if(inodeInUse(inodeId) == 1)
+    {
+        return ERROR_INODEID_ALREADY_IN_USE;
+    }
+    inodeBitmap[inodeId/32] = setBitFromUint(inodeBitmap[inodeId/32], inodeId%32, 1);  // 更新bitmap
+    struct DiskInode* inode = inodeGet(inodeId);  // inodeGet 会分配id
+    updateInode(inode);  // 写入磁盘
+    superBlock->freeInode = superBlock->freeInode - 1;
+    bitmapWrite(0);
+    return NO_ERROR;
+}
+
 
 //------------------------------block相关------------------------------
 
@@ -243,81 +319,44 @@ int allocateBlock(unsigned int inodeId)
 
 
 
-//------------------------------inode相关------------------------------
 
-// 更新inode, 写入磁盘
-int updateInode(struct DiskInode* inode)
+//-----------------------------字符相关--------------------------------
+
+//查找某个字符在字符串中的位置
+int strPos(char* str, int start, const char needle)
 {
-    int inodePos = superBlock->inodeStart*1024 + inode->inodeId*superBlock->diskInodeSize;
-    fseek(virtualDisk, inodePos, SEEK_SET);  // 定位到对应inode
-    int writeSize = fwrite(inode, sizeof(struct DiskInode), 1, virtualDisk);
-    fflush(virtualDisk);
-    if(writeSize != 1)
-    {
-        return ERROR_UPDATE_INODE_FAIL;
-    }
-    return NO_ERROR;
+	for (int i = start; i<strlen(str); i++)
+	{
+		if (str[i] == needle)
+			return i;
+	}
+	return -1;
 }
-
-// 通过inodeId获取DiskInode指针
-struct DiskInode* inodeGet(unsigned int inodeId)
+//复制src到dst
+int strCpy(char *dst, char *src, int offset)
 {
-    if (virtualDisk == NULL)
-    {
-        return NULL;
-    }
-    int inodePos = INODE_START*1024 + inodeId*DISK_INODE_SIZE;
-    fseek(virtualDisk, inodePos, SEEK_SET); // 指针移到对应inode的位置
-    int readSize = fread(&inodeArr[inodeId], sizeof(struct DiskInode), 1, virtualDisk);
-    if (readSize != 1)
-    {
-        return NULL;
-    }
-    if (inodeArr[inodeId].createTime == 0) // new file
-    {
-        inodeArr[inodeId].fileSize = 0;
-        inodeArr[inodeId].inodeId = inodeId;
-        time_t timer;
-        time(&timer);
-        inodeArr[inodeId].createTime = timer;
-        updateInode(&inodeArr[inodeId]);
-    }
-    inodeArr[inodeId].inodeId = inodeId;
-    return &inodeArr[inodeId];
+	int len = strlen(src);
+	if (len <= offset)
+		return 0;
+	int i;
+	for (i = 0; i<len - offset; i++)
+	{
+		dst[i] = src[i + offset];
+		//cout<<"dst["<<i<<"]"<<dst[i]<<endl;
+	}
+	dst[i] = 0;
+	return 1;
 }
-
-// 判断inode是否被使用, 使用则返回True(1)
-int inodeInUse(int inodeId)
+//从start开始复制字符串
+int subStr(char* src, char*dst, int start, int end = -1)
 {
-    bitmapRead(0);
-    int pos1 = (int)inodeId/32;   // 0~255
-    int pos2 = inodeId%32;        // 0~31
-    if (getBitFromUint(inodeBitmap[pos1], pos2) == 1)
-    {
-        return 1;
-    }
-    else return 0;
+	int pos = 0;
+	end == -1 ? end = strlen(src) : 0;
+	for (int i = start; i<end; i++)
+		dst[pos++] = src[i];
+	dst[pos] = 0;
+	return 1;
 }
-
-// 只分配了inode, 没有分配磁盘空间
-int allocateInode(int inodeId)
-{
-    if(superBlock->freeInode == 0)
-    {
-        return ERROR_INSUFFICIENT_FREE_INODE;
-    }
-    if(inodeInUse(inodeId) == 1)
-    {
-        return ERROR_INODEID_ALREADY_IN_USE;
-    }
-    inodeBitmap[inodeId/32] = setBitFromUint(inodeBitmap[inodeId/32], inodeId%32, 1);  // 更新bitmap
-    struct DiskInode* inode = inodeGet(inodeId);  // inodeGet 会分配id
-    updateInode(inode);  // 写入磁盘
-    superBlock->freeInode = superBlock->freeInode - 1;
-    bitmapWrite(0);
-    return NO_ERROR;
-}
-
 
 
 //--------------------------------初始化--------------------------------
@@ -361,6 +400,8 @@ int initialize(const char* path)
     time(&timer);
     root->createTime = timer;
     updateInode(root);   // 写入磁盘
+    currInode=root;
+    updateInode(currInode);
     
     // 文件目录初始化
     currFileDir = (struct FileDirectory*)calloc(1, sizeof(FileDirectory));
@@ -416,11 +457,102 @@ int loadVirtualDisk(const char* path)
 
 
 //------------------------------输入的响应事件------------------------------
+DiskInode* cd(char* path,DiskInode* node){
+        if(path[0] == '/'||strlen(path)==1){
+            currInode=root;
+            return NULL;
+        }
+        int start=path[0]=='/';
+        char t[16]={0};
+        int pos=strPos(path,1,'/');
+        subStr(path,t,start,pos);
+        int type=node->type;
+        if(type==0){ //inode
+            int count=node->fileSize/sizeof(FileDirectoryEntry);
+            int addnum = count / 4096 + (count % 4096 >= 1 ? 1 : 0);
+            FileDirectory* dir=(FileDirectory*)calloc(1,sizeof(FileDirectory));
+            if(addnum>8) addnum=8;
+            for(int add=0;add<addnum;add++){
+                blockRead(dir,getBlockIdFromAddress(node->addr[add]),0,sizeof(FileDirectory));
+                for(int i=0;i<dir->directoryNum;i++){
+                    if(strcmp(dir->fileDirectoryEntry[i].fileName,t)==0){
+                        count=-1;
+                        currFileDirEntry=dir->fileDirectoryEntry[i];
+                        DiskInode* tmpnode=inodeGet(dir->fileDirectoryEntry[i].inodeId);
+                        node=tmpnode;
+                        break;
+                    }
+                }if(count==-1)
+                  break;
 
+            }if(count!=-1)
+              node=NULL;
+        }
+        else{
+            node=NULL;
+            return node;
+        }
+        if (pos != -1 && node != NULL)
+	    {
+		subStr(path, t, pos + 1);
+		return cd(t, node);
+	    }
+	if (pos == -1)
+		return node;
+
+}
 // 创建文件
-int createFile()
+int createFile(char* filename)
 {
-    int a;
+    if(currInode->type!=1){
+        cout<<"current node is not a dir"<<endl;
+        return -1;
+    }
+    int count=currInode->fileSize/sizeof(FileDirectoryEntry);
+    if(count>252){
+        cout<<"can not make more dir in current dir"<<endl;
+        return -1;
+    }
+    int addnum = count / 4096 + (count % 4096 >= 1 ? 1 : 0);
+    FileDirectory* dir=(FileDirectory*)calloc(1,sizeof(FileDirectory));
+    if(addnum>8) addnum=8;
+    for(int add=0;add<addnum;add++){
+        blockRead(dir,getBlockIdFromAddress(currInode->addr[add]),0,sizeof(FileDirectory));
+        for(int i=0;i<dir->directoryNum;i++)
+            if(strcmp(dir->fileDirectoryEntry[i].fileName,filename)==0){
+                     cout.write(filename, strlen(filename));
+				     cout << " is exist in current dir!" << endl;
+				     return -1;
+                    }     
+        }
+        currInode->fileSize+=sizeof(currFileDirEntry);
+        updateInode(currInode);
+        int addr = count / 4096;
+        blockRead(dir,getBlockIdFromAddress(currInode->addr[addr]),0,sizeof(FileDirectoryEntry));
+        strcpy(dir->fileDirectoryEntry[dir->directoryNum].fileName,filename);
+        //找到一个空闲的Inode，并创建
+        int id;
+        for(int i=1;i<256;i++)
+            if(inodeBitmap[i]==0) {
+                id=i;
+                allocateInode(id);
+            }
+        DiskInode* tmpnode = (struct DiskInode*)calloc(1, sizeof(DiskInode));
+        tmpnode->fileSize = 0;
+        tmpnode->inodeId = id;
+        time_t timer;
+        time(&timer);
+        tmpnode->createTime = timer;
+        allocateBlock(id);
+        updateInode(tmpnode);   // 写入磁盘
+        dir->fileDirectoryEntry[dir->directoryNum].inodeId=tmpnode->inodeId;
+        dir->directoryNum+=1;
+        blockWrite(dir,getBlockIdFromAddress(currInode->addr[addr]),0,sizeof(FileDirectoryEntry));
+        return 1;
+       
+
+        
+
 }
 
 int dispatcher()
@@ -428,6 +560,7 @@ int dispatcher()
     // 补充welcome message, group info(names and IDs), copyright
     char command[8192] = {0};
     char str[8192] = {0};
+    // cout<<"[@localhost /"<<(currInode->inodeId == 0?"/":currFileDirEntry.fileName)<<"]#";
     cout<<"[@localhost /"<<(currInode->inodeId == 0?"/":currFileDirEntry.fileName)<<"]#";
     char ch = getchar();
     int num = 0;
@@ -446,7 +579,19 @@ int dispatcher()
     if(strcmp(command, "createFile") == 0)
     {
         // createFile fileName fileSize
-        createFile();
+        strCpy(command, str, strlen(command) + 1);
+        createFile(command);
+    }
+    else if(strcmp(command,"cd")==0){
+        DiskInode* inode = NULL, *ret = NULL;
+		strCpy(command, str, strlen(command) + 1);
+		if (command[0] == '/')
+			inode = root;
+		else
+			inode = currInode;
+		ret = cd(command, inode);
+		if (ret != NULL)
+			currInode = ret;
     }
     /*
     deleteFile filename

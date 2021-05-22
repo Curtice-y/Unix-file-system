@@ -308,32 +308,22 @@ int allocateBlock(unsigned int inodeId, int fileSize)
     {
         return ERROR_INSUFFICIENT_FREE_BLOCKS;
     }
-<<<<<<< HEAD
-    int blockNum = (fileSize+1023)/1024;
-    for(int i=0;i<min(blockNum, 10);i++)
-=======
-
-    for (int i = 0; i < min(fileSize, 10); i++)
->>>>>>> ec015523d532d132c04453044716a71a54989cc5
+    int blockNum = (fileSize + 1023) / 1024;
+    for (int i = 0; i < min(blockNum, 10); i++)
     {
         unsigned int t = allocateOneBlock();
         inode->addr[i] = getAddressFromBlockId(t);
         // cout<<"the blockid "<<t<<endl;
         // cout<<getBlockIdFromAddress(inode->addr[i])<<endl;
     }
-<<<<<<< HEAD
-    blockNum-=10;
+    blockNum -= 10;
     if (blockNum > 0)
-=======
-    fileSize -= 10;
-    if (fileSize > 0)
->>>>>>> ec015523d532d132c04453044716a71a54989cc5
     {
         unsigned int blockId = allocateOneBlock();
         // blockBitmap[blockId]=1;
         inode->addr[10] = getAddressFromBlockId(blockId);
         struct Address *address = (struct Address *)calloc(1, sizeof(struct Address));
-        for (int i = 0; i < fileSize; i++)
+        for (int i = 0; i < blockNum; i++)
         {
             // 中间变量暂存, 因为临时变量不能取地址
             Address temp = getAddressFromBlockId(allocateOneBlock());
@@ -349,42 +339,42 @@ int allocateBlock(unsigned int inodeId, int fileSize)
 //-----------------------------字符相关--------------------------------
 
 //查找某个字符在字符串中的位置
-int strPos(char *str, int start, const char needle)
-{
-    for (int i = start; i < strlen(str); i++)
-    {
-        if (str[i] == needle)
-            return i;
-    }
-    return -1;
-}
+// int strPos(char *str, int start, const char needle)
+// {
+//     for (int i = start; i < strlen(str); i++)
+//     {
+//         if (str[i] == needle)
+//             return i;
+//     }
+//     return -1;
+// }
 
-//复制src到dst
-int strCpy(char *dst, char *src, int offset)
-{
-    int len = strlen(src);
-    if (len <= offset)
-        return 0;
-    int i;
-    for (i = 0; i < len - offset; i++)
-    {
-        dst[i] = src[i + offset];
-        //cout<<"dst["<<i<<"]"<<dst[i]<<endl;
-    }
-    dst[i] = 0;
-    return 1;
-}
+// //复制src到dst
+// int strCpy(char *dst, char *src, int offset)
+// {
+//     int len = strlen(src);
+//     if (len <= offset)
+//         return 0;
+//     int i;
+//     for (i = 0; i < len - offset; i++)
+//     {
+//         dst[i] = src[i + offset];
+//         //cout<<"dst["<<i<<"]"<<dst[i]<<endl;
+//     }
+//     dst[i] = 0;
+//     return 1;
+// }
 
-//从start开始复制字符串
-int subStr(char *src, char *dst, int start, int end = -1)
-{
-    int pos = 0;
-    end == -1 ? end = strlen(src) : 0;
-    for (int i = start; i < end; i++)
-        dst[pos++] = src[i];
-    dst[pos] = 0;
-    return 1;
-}
+// //从start开始复制字符串
+// int subStr(char *src, char *dst, int start, int end = -1)
+// {
+//     int pos = 0;
+//     end == -1 ? end = strlen(src) : 0;
+//     for (int i = start; i < end; i++)
+//         dst[pos++] = src[i];
+//     dst[pos] = 0;
+//     return 1;
+// }
 
 //--------------------------------初始化--------------------------------
 
@@ -419,6 +409,7 @@ int initialize(const char *path)
     superBlock->freeInode = DISK_INODE_NUM - 1;
     superBlock->freeBlock = BLOCK_NUM;
     fseek(virtualDisk, 0, SEEK_SET);
+    blockWrite(superBlock, superBlock->start, 0, sizeof(struct SuperBlock), 1);
 
     // 根目录初始化
     FileDirectory *root = (struct FileDirectory *)calloc(1, sizeof(FileDirectory));
@@ -470,6 +461,238 @@ int loadVirtualDisk(const char *path)
     bitmapRead(1);
     bitmapRead(2);
 
+    return NO_ERROR;
+}
+
+int fileRead(DiskInode *inode, char *buffer, int pos, int count)
+{
+    //超出文件大小
+    if (pos + count > inode->fileSize)
+    {
+        return FILE_READ_OVERHEAD;
+    }
+
+    int total = 0;
+    char *cache = new char[5 * 1024];
+    //起点在二级地址中
+    if (pos > 10 * BLOCK_SIZE)
+    {
+        //获取第11个地址指向的块，并获取块中写的内容
+        Address secondartAddress = inode->addr[10];
+        unsigned int addressBlockId = getBlockIdFromAddress(secondartAddress);
+
+        int startBlockPos = pos / 1024 - 10;
+        Address address;
+        blockRead(&address, addressBlockId, startBlockPos * sizeof(Address), sizeof(Address));
+        unsigned int blockId = getBlockIdFromAddress(address);
+
+        //长度不足一个block
+        if (count <= 1024 - (pos % 1024))
+        {
+            blockRead(buffer, blockId, pos % 1024, count);
+            total += count;
+        }
+        else //超过一个block时，先把第一个block的读完，然后对齐
+        {
+
+            blockRead(cache, blockId, pos % 1024, 1024 - (pos % 1024));
+            total += 1024 - (pos % 1024);
+            count -= 1024 - (pos % 1024);
+            int blockOffset = 1;
+            memcpy(buffer, cache, 1024 - (pos % 1024));
+
+            //把剩余的能完整读完的block读完
+            while (count >= 1024)
+            {
+                blockRead(&address, addressBlockId, (startBlockPos + blockOffset) * sizeof(Address), sizeof(Address));
+                blockId = getBlockIdFromAddress(address);
+                blockRead(cache, blockId, 0, 1024);
+                memcpy(buffer + total, cache, 1024);
+
+                blockOffset++;
+                total += 1024;
+                count -= 1024;
+            }
+
+            //剩下最后一个不完整的block了
+            blockRead(&address, addressBlockId, (startBlockPos + blockOffset) * sizeof(Address), sizeof(Address));
+            blockId = getBlockIdFromAddress(address);
+            blockRead(buffer, blockId, 0, count);
+            memcpy(buffer + total, cache, count);
+
+            total += count;
+        }
+    }
+    else //起点在一级地址里
+    {
+        int startBlockPos = pos / 1024;
+        int endBlockIndex = (pos + count) / 1024;
+        unsigned int blockId = getBlockIdFromAddress(inode->addr[startBlockPos]);
+
+        //长度不足一个block
+        if (count <= 1024 - (pos % 1024))
+        {
+            blockRead(buffer, blockId, pos % 1024, count);
+            total += count;
+        }
+        else //长度多于一个block
+        {
+            //先把第一个block的读完，然后对齐
+            blockRead(cache, blockId, pos % 1024, 1024 - (pos % 1024));
+            total += 1024 - (pos % 1024);
+            count -= 1024 - (pos % 1024);
+            memcpy(buffer, cache, 1024 - (pos % 1024));
+
+            if (pos + count > 10 * BLOCK_SIZE) //会从直接地址延伸至间接地址
+            {
+                for (int i = startBlockPos + 1; i < 10; i++) //先读完一级地址的部分
+                {
+                    blockId = getBlockIdFromAddress(inode->addr[i]);
+                    blockRead(cache, blockId, 0, 1024);
+                    memcpy(buffer + total, cache, 1024);
+                    total += 1024;
+                    count -= 1024;
+                }
+
+                //获取第11个地址指向的块，并获取块中写的内容
+                Address secondartAddress = inode->addr[10];
+                unsigned int addressBlockId = getBlockIdFromAddress(secondartAddress);
+                int restBlocks = (count + 1023) / 1024; //还剩下几个block
+                Address address;
+
+                for (int i = 0; i < restBlocks - 1; ++i) //把剩余的能完整读完的block读完
+                {
+                    blockRead(&address, addressBlockId, i * sizeof(Address), sizeof(Address));
+                    blockId = getBlockIdFromAddress(address);
+
+                    blockRead(cache, blockId, 0, 1024);
+                    memcpy(buffer + total, cache, 1024);
+                    total += 1024;
+                    count -= 1024;
+                }
+
+                //处理最后一个块
+                blockRead(&address, addressBlockId, (restBlocks - 1) * sizeof(Address), sizeof(Address));
+                blockId = getBlockIdFromAddress(address);
+                blockRead(cache, blockId, 0, count);
+                memcpy(buffer + total, cache, count);
+                total += count;
+            }
+            else //不会延伸至二级地址
+            {
+
+                for (int i = startBlockPos + 1; i < endBlockIndex; i++) //先读完能完整读完的block
+                {
+                    blockId = getBlockIdFromAddress(inode->addr[i]);
+                    blockRead(cache, blockId, 0, 1024);
+                    memcpy(buffer + total, cache, 1024);
+                    total += 1024;
+                    count -= 1024;
+                }
+
+                //最后一个block
+                blockId = getBlockIdFromAddress(inode->addr[endBlockIndex]);
+                blockRead(cache, blockId, 0, count);
+                memcpy(buffer + total, cache, count);
+                total += count;
+            }
+        }
+    }
+
+    delete[] cache;
+    return NO_ERROR;
+}
+
+//文件写入暂时只设计能一次性写完的，从某个pos开始的太难实现
+int fileWrite(DiskInode *inode, char *buffer, int size)
+{
+    if (size > MAX_FILE_SIZE)
+    {
+        return FILE_TOO_LARGE;
+    }
+
+    unsigned int blockId;
+    //先释放原来的文件内容，再写入新的内容
+    for (int i = 0; i < 10; ++i)
+    {
+        blockId = getBlockIdFromAddress(inode->addr[i]);
+        blockFree(blockId);
+    }
+
+    //如果原来的文件有使用二级地址，也要把二级地址free掉
+    if (inode->fileSize > 10 * BLOCK_SIZE)
+    {
+        Address secondartAddress = inode->addr[10];
+        unsigned int addressBlockId = getBlockIdFromAddress(secondartAddress);
+
+        int secondaryAddressUsed = (inode->fileSize + 1023) / 1024 - 10;
+        Address address;
+        for (int i = 0; i < secondaryAddressUsed; ++i)
+        {
+            blockRead(&address, addressBlockId, i * sizeof(Address), sizeof(Address));
+            blockId = getBlockIdFromAddress(address);
+            blockFree(blockId);
+        }
+    }
+
+    //最后再把第11个地址free掉
+    blockId = getBlockIdFromAddress(inode->addr[10]);
+    blockFree(blockId);
+
+    int blocksNeeded = (size + 1023) / 1024;
+    allocateBlock(inode->inodeId, size);
+    //分配后要刷新
+    inode = inodeGet(inode->inodeId);
+
+    //开始写入，判断是否需要用到二级地址
+    char *cache = new char[5 * BLOCK_SIZE];
+    if (size > 10 * BLOCK_SIZE)
+    {
+        //先写满10个一级地址
+        for (int i = 0; i < 10; ++i)
+        {
+            blockId = getBlockIdFromAddress(inode->addr[i]);
+            memcpy(cache, buffer + i * 1024, 1024);
+            blockWrite(cache, blockId, 0, 1024);
+            size -= 1024;
+        }
+
+        Address secondartAddress = inode->addr[10];
+        unsigned int addressBlockId = getBlockIdFromAddress(secondartAddress);
+        Address address;
+        for (int i = 0; i < blocksNeeded - 11; ++i)
+        {
+            blockRead(&address, addressBlockId, i * sizeof(Address), sizeof(Address));
+            blockId = getBlockIdFromAddress(address);
+            memcpy(cache, buffer + (i + 10) * 1024, 1024);
+
+            blockWrite(cache, blockId, 0, 1024);
+            size -= 1024;
+        }
+
+        //最后一个block
+        blockRead(&address, addressBlockId, blocksNeeded - 11 * sizeof(Address), sizeof(Address));
+        blockId = getBlockIdFromAddress(address);
+        memcpy(cache, buffer + (blocksNeeded - 1) * 1024, size);
+        blockWrite(cache, blockId, 0, size);
+    }
+    else
+    {
+        for (int i = 0; i < blocksNeeded - 1; ++i)
+        {
+            blockId = getBlockIdFromAddress(inode->addr[i]);
+            memcpy(cache, buffer + i * 1024, 1024);
+            blockWrite(cache, blockId, 0, 1024);
+            size -= 1024;
+        }
+
+        //最后一个block
+        blockId = getBlockIdFromAddress(inode->addr[blocksNeeded - 1]);
+        memcpy(cache, buffer + (blocksNeeded - 1) * 1024, size);
+        blockWrite(cache, blockId, 0, size);
+    }
+
+    delete[] cache;
     return NO_ERROR;
 }
 

@@ -34,7 +34,7 @@ struct DiskInode
 {
     int type;             // 文件类型
     unsigned int inodeId; // 索引节点id
-    int fileSize;         // 文件大小 按字节
+    int fileSize;         // 文件大小 
     Address addr[11];     // 物理地址 addr[0]~addr[9]是直接地址, addr[10]是间接地址
     int createTime;       // 创建时间
     int modifyTime;       // 修改时间

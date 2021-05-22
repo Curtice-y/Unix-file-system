@@ -16,13 +16,9 @@ char buf[TOTAL_SIZE];
 FILE* virtualDisk;
 // 超级块
 struct SuperBlock* superBlock;
-// 当前文件目录项
-struct FileDirectoryEntry currFileDirEntry;
-// 当前文件目录
+// 当前目录
 struct FileDirectory* currFileDir;
 
-// 当前节点
-struct DiskInode* currInode;
 // 两种bitmap
 unsigned int inodeBitmap[128] = {0};
 unsigned int blockBitmap[512] = {0};
@@ -34,7 +30,7 @@ bool logout = false;
 
 //------------------------------转换函数------------------------------
 
-unsigned int sizeToBlockNum(unsigned int size)
+unsigned int sizeToBlockId(unsigned int size)
 {
     return (unsigned int)(size/1024);
 }
@@ -127,6 +123,7 @@ int bitmapRead(int kind)
     }
     return NO_ERROR;
 }
+
 int bitmapWrite(int kind)
 {
     unsigned int bitmapPos;
@@ -190,23 +187,23 @@ struct DiskInode* inodeGet(unsigned int inodeId)
     }
     int inodePos = INODE_START*1024 + inodeId*DISK_INODE_SIZE;
     fseek(virtualDisk, inodePos, SEEK_SET); // 指针移到对应inode的位置
-    int readSize = fread(&inodeArr[inodeId], sizeof(struct DiskInode), 1, virtualDisk);
+    struct DiskInode* diskInode = (struct DiskInode*)calloc(1, sizeof(struct DiskInode));
+    int readSize = fread(diskInode, sizeof(struct DiskInode), 1, virtualDisk);
     if (readSize != 1)
     {
         return NULL;
     }
-    if (inodeArr[inodeId].createTime == 0) // new file
+    if (diskInode->createTime == 0) // new file
     {
-        inodeArr[inodeId].fileSize = 0;
-        cout<<"new file"<<endl; 
-        inodeArr[inodeId].inodeId = inodeId;
+        diskInode->fileSize = 0;
+        diskInode->inodeId = inodeId;
         time_t timer;
         time(&timer);
-        inodeArr[inodeId].createTime = timer;
-        updateInode(&inodeArr[inodeId]);
+        diskInode->createTime = timer;
+        updateInode(diskInode);
     }
-    inodeArr[inodeId].inodeId = inodeId;
-    return &inodeArr[inodeId];
+    diskInode->inodeId = inodeId;
+    return diskInode;
 }
 
 // 判断inode是否被使用, 使用则返回True(1)
@@ -278,6 +275,7 @@ int blockFree(unsigned int blockId)
     bitmapRead(1);
     blockBitmap[blockId/32] = setBitFromUint(blockBitmap[blockId/32], blockId%32, 0);
     bitmapWrite(1);
+    return NO_ERROR;
 }
 
 // 分配一块数据块 返回blockId  (未检验是否有空闲数据块)
@@ -286,8 +284,7 @@ unsigned int allocateOneBlock()
     bool find = false;
     unsigned int blockId;
     for(int i=0;i<512;i++)
-    {   
-        
+    {
         for(int j=0;j<31;j++)
         {
             if(getBitFromUint(blockBitmap[i], j) == 0)
@@ -296,7 +293,6 @@ unsigned int allocateOneBlock()
                 find == true;
                 blockId = i*32 + j;
                 return blockId;
-                
             }
             if(find == true)
                 break;
@@ -309,19 +305,19 @@ unsigned int allocateOneBlock()
 }
 
 // 为inode对应文件分配block, 调用函数前需要设置inode的fileSize
-int allocateBlock(unsigned int inodeId,int fileSize)
+int allocateBlock(unsigned int inodeId, int fileSize)
 {
     bitmapRead(1);
     struct DiskInode* inode = inodeGet(inodeId);
     inode->fileSize=fileSize;
-    if (sizeToBlockNum(inode->fileSize) > superBlock->freeBlock - 1) // -1 是为了间址所使用的block
+    if (sizeToBlockId(inode->fileSize) > superBlock->freeBlock - 1) // -1 是为了间址所使用的block
     {
         return ERROR_INSUFFICIENT_FREE_BLOCKS;
     }
     
     for(int i=0;i<min(fileSize, 10);i++)
     {
-        unsigned int t=allocateOneBlock();
+        unsigned int t = allocateOneBlock();
         inode->addr[i] = getAddressFromBlockId(t);
         // cout<<"the blockid "<<t<<endl;
         // cout<<getBlockIdFromAddress(inode->addr[i])<<endl;
@@ -416,24 +412,23 @@ int initialize(const char* path)
     superBlock->blockNum = BLOCK_NUM;
     superBlock->blockSize = BLOCK_SIZE;
     superBlock->diskInodeNum = DISK_INODE_NUM;
-    superBlock->fileInodeNum = FILE_INODE_NUM;
+    superBlock->entryNum = ENTRY_NUM;
     superBlock->diskInodeSize = DISK_INODE_SIZE;
     superBlock->freeInode = DISK_INODE_NUM - 1;
     superBlock->freeBlock = BLOCK_NUM;
     fseek(virtualDisk, 0, SEEK_SET);
     
     // 根目录初始化
-    currFileDir = (struct FileDirectory*)calloc(1, sizeof(FileDirectory));
-    currFileDir->fileDirNum = 0;
+    FileDirectory* root = (struct FileDirectory*)calloc(1, sizeof(FileDirectory));
+    root->fileDirNum = 0;
     char str[] = "/";
-    strncpy(currFileDirEntry.fileName, str, sizeof(currFileDirEntry.fileName));
-    currFileDirEntry.id = 0; 
-    currFileDir->fileDirectoryEntry[0] = currFileDirEntry;
-    blockWrite(currFileDir, superBlock->fileDirStart, sizeof(struct FileDirectory), 1); // 写入磁盘
+    strncpy(root->fileDirectoryName, str, sizeof(root->fileDirectoryName));
+    root->fileDirectoryId = 0;
+    blockWrite(root, superBlock->fileDirStart, sizeof(struct FileDirectory), 1); // 写入磁盘
     fileDirBitmap[0] = setBitFromUint(fileDirBitmap[0], 0, 1);
     bitmapWrite(2); // 更新bitmap
 
-    // Bitmap初始化
+    // blockBitmap初始化
     for(int i=0; i<superBlock->blockStart; i++)
     {
         blockBitmap[i/32] = setBitFromUint(blockBitmap[i/32], i%32, 1);
@@ -465,13 +460,14 @@ int loadVirtualDisk(const char* path)
     {
         return ERROR_LOAD_SUPER_FAIL;
     }
-    // 读入文件目录表
+    // 读入文件目录表(根目录)
     currFileDir = (struct FileDirectory*)calloc(1, sizeof(struct FileDirectory));
     blockRead(currFileDir, superBlock->fileDirStart, 0, sizeof(struct FileDirectory));
     
     // 读入bitmap
     bitmapRead(0);
     bitmapRead(1);
+    bitmapRead(2);
 
     return NO_ERROR;
 }
@@ -479,6 +475,8 @@ int loadVirtualDisk(const char* path)
 
 
 //------------------------------输入的响应事件------------------------------
+
+/*
 DiskInode* cd(char* path,DiskInode* node){
         if(path[0] == '/'&&strlen(path)==1){
             currInode->inodeId=0;
@@ -909,15 +907,16 @@ int dispatcher()
         sumblock();
     }
 
-    /*
-    deleteFile filename
-    createDir
-    deleteDir
-    changeDir
-    dir
-    cp
-    sum
-    cat
-    */
+    
+    // deleteFile filename
+    // createDir
+    // deleteDir
+    // changeDir
+    // dir
+    // cp
+    // sum
+    // cat
+    
 
 }
+*/

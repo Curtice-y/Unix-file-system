@@ -1,8 +1,8 @@
 #define MAX_FILE_NAME 32
-#define MAX_FILE_SIZE 351*1024
+#define MAX_FILE_SIZE 351 * 1024
 #define MAX_DIR_NUM 128
 
-#define TOTAL_SIZE 16*1024*1024
+#define TOTAL_SIZE 16 * 1024 * 1024
 
 #define START 1
 #define FILE_DIR_START 2
@@ -12,11 +12,10 @@
 #define INODE_START 134
 #define BLOCK_START 390
 
-
 #define BLOCK_NUM 16384
 #define BLOCK_SIZE 1024
 
-#define DISK_INODE_NUM 1024*4
+#define DISK_INODE_NUM 1024 * 4
 #define ENTRY_NUM 28
 #define DISK_INODE_SIZE 64
 

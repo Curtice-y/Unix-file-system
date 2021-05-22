@@ -3,8 +3,7 @@
 #include <fstream>
 #include <string.h>
 #include <time.h>
-#include<stdlib.h>
-
+#include <stdlib.h>
 
 #include "define.h"
 #include "dataStruct.h"
@@ -13,11 +12,11 @@ using namespace std;
 
 char buf[TOTAL_SIZE];
 // 模拟磁盘
-FILE* virtualDisk;
+FILE *virtualDisk;
 // 超级块
-struct SuperBlock* superBlock;
+struct SuperBlock *superBlock;
 // 当前目录
-struct FileDirectory* currFileDir;
+struct FileDirectory *currFileDir;
 
 // 两种bitmap
 unsigned int inodeBitmap[128] = {0};
@@ -27,37 +26,36 @@ unsigned int fileDirBitmap[4] = {0};
 // 退出
 bool logout = false;
 
-
 //------------------------------转换函数------------------------------
 
 unsigned int sizeToBlockId(unsigned int size)
 {
-    return (unsigned int)(size/1024);
+    return (unsigned int)(size / 1024);
 }
 
 unsigned int getBlockIdFromAddress(struct Address addr)
 {
-    return (unsigned int)(addr.ch[0]*64 + addr.ch[1]);
+    return (unsigned int)(addr.ch[0] * 64 + addr.ch[1]);
 }
 
 struct Address getAddressFromBlockId(unsigned int blockId)
 {
     Address addr;
     addr.ch[2] = 0;
-    addr.ch[1] = blockId%64;
-    addr.ch[0] = (int)(blockId/64);
+    addr.ch[1] = blockId % 64;
+    addr.ch[0] = (int)(blockId / 64);
     return addr;
 }
 
 // 提取unsigned int 中pos位置的bit
-int getBitFromUint(unsigned int num,int leftPos)
+int getBitFromUint(unsigned int num, int leftPos)
 {
     int rightPos = 31 - leftPos;
-    for(int i=0;i<rightPos;i++)
+    for (int i = 0; i < rightPos; i++)
     {
-        num/=2;
+        num /= 2;
     }
-    return num%2;
+    return num % 2;
 }
 
 // 设置unsigned int 中pos位置的bit 返回unsigned int
@@ -66,16 +64,16 @@ unsigned int setBitFromUint(unsigned int num, int leftPos, int bit)
     unsigned int temp = 1;
     unsigned int utemp = num;
     int rightPos = 31 - leftPos;
-    for(int i=0;i<rightPos;i++)
+    for (int i = 0; i < rightPos; i++)
     {
-        num/=2;
-        temp*=2;
+        num /= 2;
+        temp *= 2;
     }
-    if(num%2 != bit)
+    if (num % 2 != bit)
     {
-        if(num%2 == 1)
+        if (num % 2 == 1)
         {
-            utemp-=temp;
+            utemp -= temp;
         }
         else
         {
@@ -91,19 +89,19 @@ unsigned int setBitFromUint(unsigned int num, int leftPos, int bit)
 int bitmapRead(int kind)
 {
     unsigned int bitmapPos;
-    if (kind == 0)   // inode
+    if (kind == 0) // inode
     {
-        bitmapPos = superBlock->inodeBitmapStart*1024;
+        bitmapPos = superBlock->inodeBitmapStart * 1024;
         fseek(virtualDisk, bitmapPos, SEEK_SET);
         int readSize = fread(inodeBitmap, sizeof(inodeBitmap), 128, virtualDisk);
-        if(readSize != 128)
+        if (readSize != 128)
         {
             return ERROR_READ_BITMAP;
         }
     }
-    else if(kind == 1)   // block
+    else if (kind == 1) // block
     {
-        bitmapPos = superBlock->blockBitmapStart*1024;
+        bitmapPos = superBlock->blockBitmapStart * 1024;
         fseek(virtualDisk, bitmapPos, SEEK_SET);
         int readSize = fread(blockBitmap, sizeof(blockBitmap), 512, virtualDisk);
         if (readSize != 512)
@@ -111,9 +109,9 @@ int bitmapRead(int kind)
             return ERROR_READ_BITMAP;
         }
     }
-    else if(kind == 2)   // fileDir
+    else if (kind == 2) // fileDir
     {
-        bitmapPos = superBlock->fileDirBitmapStart*1024;
+        bitmapPos = superBlock->fileDirBitmapStart * 1024;
         fseek(virtualDisk, bitmapPos, SEEK_SET);
         int readSize = fread(blockBitmap, sizeof(blockBitmap), 4, virtualDisk);
         if (readSize != 4)
@@ -127,19 +125,19 @@ int bitmapRead(int kind)
 int bitmapWrite(int kind)
 {
     unsigned int bitmapPos;
-    if (kind == 0)   // inode
+    if (kind == 0) // inode
     {
-        bitmapPos = superBlock->inodeBitmapStart*1024;
+        bitmapPos = superBlock->inodeBitmapStart * 1024;
         fseek(virtualDisk, bitmapPos, SEEK_SET);
         int writeSize = fwrite(inodeBitmap, sizeof(inodeBitmap), 128, virtualDisk);
-        if(writeSize != 256)
+        if (writeSize != 256)
         {
             return ERROR_WRITE_BITMAP;
         }
     }
-    else if(kind == 1)   // block
+    else if (kind == 1) // block
     {
-        bitmapPos = superBlock->blockBitmapStart*1024;
+        bitmapPos = superBlock->blockBitmapStart * 1024;
         fseek(virtualDisk, bitmapPos, SEEK_SET);
         int writeSize = fread(blockBitmap, sizeof(blockBitmap), 512, virtualDisk);
         if (writeSize != 512)
@@ -147,9 +145,9 @@ int bitmapWrite(int kind)
             return ERROR_WRITE_BITMAP;
         }
     }
-    else if(kind == 1)   // fileDir
+    else if (kind == 1) // fileDir
     {
-        bitmapPos = superBlock->fileDirBitmapStart*1024;
+        bitmapPos = superBlock->fileDirBitmapStart * 1024;
         fseek(virtualDisk, bitmapPos, SEEK_SET);
         int writeSize = fread(blockBitmap, sizeof(blockBitmap), 4, virtualDisk);
         if (writeSize != 4)
@@ -160,18 +158,16 @@ int bitmapWrite(int kind)
     return NO_ERROR;
 }
 
-
-
 //------------------------------inode相关------------------------------
 
 // 更新inode, 写入磁盘
-int updateInode(struct DiskInode* inode)
-{  
-    int inodePos = superBlock->inodeStart*1024 + inode->inodeId*superBlock->diskInodeSize;
-    fseek(virtualDisk, inodePos, SEEK_SET);  // 定位到对应inode
+int updateInode(struct DiskInode *inode)
+{
+    int inodePos = superBlock->inodeStart * 1024 + inode->inodeId * superBlock->diskInodeSize;
+    fseek(virtualDisk, inodePos, SEEK_SET); // 定位到对应inode
     int writeSize = fwrite(inode, sizeof(struct DiskInode), 1, virtualDisk);
     fflush(virtualDisk);
-    if(writeSize != 1)
+    if (writeSize != 1)
     {
         return ERROR_UPDATE_INODE_FAIL;
     }
@@ -179,15 +175,15 @@ int updateInode(struct DiskInode* inode)
 }
 
 // 通过inodeId获取DiskInode指针
-struct DiskInode* inodeGet(unsigned int inodeId)
+struct DiskInode *inodeGet(unsigned int inodeId)
 {
     if (virtualDisk == NULL)
     {
         return NULL;
     }
-    int inodePos = INODE_START*1024 + inodeId*DISK_INODE_SIZE;
+    int inodePos = INODE_START * 1024 + inodeId * DISK_INODE_SIZE;
     fseek(virtualDisk, inodePos, SEEK_SET); // 指针移到对应inode的位置
-    struct DiskInode* diskInode = (struct DiskInode*)calloc(1, sizeof(struct DiskInode));
+    struct DiskInode *diskInode = (struct DiskInode *)calloc(1, sizeof(struct DiskInode));
     int readSize = fread(diskInode, sizeof(struct DiskInode), 1, virtualDisk);
     if (readSize != 1)
     {
@@ -210,42 +206,42 @@ struct DiskInode* inodeGet(unsigned int inodeId)
 int inodeInUse(int inodeId)
 {
     bitmapRead(0);
-    int pos1 = (int)inodeId/32;   // 0~255
-    int pos2 = inodeId%32;        // 0~31
+    int pos1 = (int)inodeId / 32; // 0~255
+    int pos2 = inodeId % 32;      // 0~31
     if (getBitFromUint(inodeBitmap[pos1], pos2) == 1)
     {
         return 1;
     }
-    else return 0;
+    else
+        return 0;
 }
 
 // 只分配了inode, 没有分配磁盘空间
 int allocateInode(int inodeId)
 {
-    if(superBlock->freeInode == 0)
+    if (superBlock->freeInode == 0)
     {
         return ERROR_INSUFFICIENT_FREE_INODE;
     }
-    if(inodeInUse(inodeId) == 1)
+    if (inodeInUse(inodeId) == 1)
     {
         return ERROR_INODEID_ALREADY_IN_USE;
     }
-    inodeBitmap[inodeId/32] = setBitFromUint(inodeBitmap[inodeId/32], inodeId%32, 1);  // 更新bitmap
-    
-    struct DiskInode* inode = inodeGet(inodeId);  // inodeGet 会分配id
-    updateInode(inode);  // 写入磁盘
+    inodeBitmap[inodeId / 32] = setBitFromUint(inodeBitmap[inodeId / 32], inodeId % 32, 1); // 更新bitmap
+
+    struct DiskInode *inode = inodeGet(inodeId); // inodeGet 会分配id
+    updateInode(inode);                          // 写入磁盘
     superBlock->freeInode = superBlock->freeInode - 1;
     bitmapWrite(0);
     return NO_ERROR;
 }
 
-
 //------------------------------block相关------------------------------
 
 // 将指定盘块号的内容读取到对应数据结构中
-int blockRead(void* buffer, unsigned int blockId, int offset, int size, int count = 1)
+int blockRead(void *buffer, unsigned int blockId, int offset, int size, int count = 1)
 {
-    unsigned int blockPos = blockId*superBlock->blockSize + offset;
+    unsigned int blockPos = blockId * superBlock->blockSize + offset;
     fseek(virtualDisk, blockPos, SEEK_SET);
     int readSize = fread(buffer, size, count, virtualDisk);
     if (readSize != count)
@@ -256,9 +252,9 @@ int blockRead(void* buffer, unsigned int blockId, int offset, int size, int coun
 }
 
 // 将数据写入盘块, 开始块号为blockId
-int blockWrite(void* buffer, unsigned int blockId, int offset, int size, int count = 1)
+int blockWrite(void *buffer, unsigned int blockId, int offset, int size, int count = 1)
 {
-    unsigned int blockPos = blockId*superBlock->blockSize + offset;
+    unsigned int blockPos = blockId * superBlock->blockSize + offset;
     fseek(virtualDisk, blockPos, SEEK_SET);
     int writeSize = fwrite(buffer, size, count, virtualDisk);
     fflush(virtualDisk);
@@ -273,7 +269,7 @@ int blockWrite(void* buffer, unsigned int blockId, int offset, int size, int cou
 int blockFree(unsigned int blockId)
 {
     bitmapRead(1);
-    blockBitmap[blockId/32] = setBitFromUint(blockBitmap[blockId/32], blockId%32, 0);
+    blockBitmap[blockId / 32] = setBitFromUint(blockBitmap[blockId / 32], blockId % 32, 0);
     bitmapWrite(1);
     return NO_ERROR;
 }
@@ -283,24 +279,22 @@ unsigned int allocateOneBlock()
 {
     bool find = false;
     unsigned int blockId;
-    for(int i=0;i<512;i++)
+    for (int i = 0; i < 512; i++)
     {
-        for(int j=0;j<31;j++)
+        for (int j = 0; j < 31; j++)
         {
-            if(getBitFromUint(blockBitmap[i], j) == 0)
+            if (getBitFromUint(blockBitmap[i], j) == 0)
             {
                 blockBitmap[i] = setBitFromUint(blockBitmap[i], j, 1);
                 find == true;
-                blockId = i*32 + j;
+                blockId = i * 32 + j;
                 return blockId;
             }
-            if(find == true)
+            if (find == true)
                 break;
-            
         }
-        if(find == true)
+        if (find == true)
             break;
-        
     }
 }
 
@@ -308,33 +302,43 @@ unsigned int allocateOneBlock()
 int allocateBlock(unsigned int inodeId, int fileSize)
 {
     bitmapRead(1);
-    struct DiskInode* inode = inodeGet(inodeId);
-    inode->fileSize=fileSize;
+    struct DiskInode *inode = inodeGet(inodeId);
+    inode->fileSize = fileSize;
     if (sizeToBlockId(inode->fileSize) > superBlock->freeBlock - 1) // -1 是为了间址所使用的block
     {
         return ERROR_INSUFFICIENT_FREE_BLOCKS;
     }
+<<<<<<< HEAD
     int blockNum = (fileSize+1023)/1024;
     for(int i=0;i<min(blockNum, 10);i++)
+=======
+
+    for (int i = 0; i < min(fileSize, 10); i++)
+>>>>>>> ec015523d532d132c04453044716a71a54989cc5
     {
         unsigned int t = allocateOneBlock();
         inode->addr[i] = getAddressFromBlockId(t);
         // cout<<"the blockid "<<t<<endl;
         // cout<<getBlockIdFromAddress(inode->addr[i])<<endl;
     }
+<<<<<<< HEAD
     blockNum-=10;
     if (blockNum > 0)
+=======
+    fileSize -= 10;
+    if (fileSize > 0)
+>>>>>>> ec015523d532d132c04453044716a71a54989cc5
     {
         unsigned int blockId = allocateOneBlock();
         // blockBitmap[blockId]=1;
         inode->addr[10] = getAddressFromBlockId(blockId);
-        struct Address* address = (struct Address*)calloc(1, sizeof(struct Address));
-        for(int i=0;i<fileSize;i++)
+        struct Address *address = (struct Address *)calloc(1, sizeof(struct Address));
+        for (int i = 0; i < fileSize; i++)
         {
             // 中间变量暂存, 因为临时变量不能取地址
             Address temp = getAddressFromBlockId(allocateOneBlock());
             address = &temp;
-            blockWrite(address, blockId, i*sizeof(struct Address), sizeof(struct Address), 1);
+            blockWrite(address, blockId, i * sizeof(struct Address), sizeof(struct Address), 1);
         }
     }
     updateInode(inode);
@@ -342,66 +346,64 @@ int allocateBlock(unsigned int inodeId, int fileSize)
     return NO_ERROR;
 }
 
-
-
-
 //-----------------------------字符相关--------------------------------
 
 //查找某个字符在字符串中的位置
-int strPos(char* str, int start, const char needle)
+int strPos(char *str, int start, const char needle)
 {
-	for (int i = start; i<strlen(str); i++)
-	{
-		if (str[i] == needle)
-			return i;
-	}
-	return -1;
+    for (int i = start; i < strlen(str); i++)
+    {
+        if (str[i] == needle)
+            return i;
+    }
+    return -1;
 }
+
 //复制src到dst
 int strCpy(char *dst, char *src, int offset)
 {
-	int len = strlen(src);
-	if (len <= offset)
-		return 0;
-	int i;
-	for (i = 0; i<len - offset; i++)
-	{
-		dst[i] = src[i + offset];
-		//cout<<"dst["<<i<<"]"<<dst[i]<<endl;
-	}
-	dst[i] = 0;
-	return 1;
-}
-//从start开始复制字符串
-int subStr(char* src, char*dst, int start, int end = -1)
-{
-	int pos = 0;
-	end == -1 ? end = strlen(src) : 0;
-	for (int i = start; i<end; i++)
-		dst[pos++] = src[i];
-	dst[pos] = 0;
-	return 1;
+    int len = strlen(src);
+    if (len <= offset)
+        return 0;
+    int i;
+    for (i = 0; i < len - offset; i++)
+    {
+        dst[i] = src[i + offset];
+        //cout<<"dst["<<i<<"]"<<dst[i]<<endl;
+    }
+    dst[i] = 0;
+    return 1;
 }
 
+//从start开始复制字符串
+int subStr(char *src, char *dst, int start, int end = -1)
+{
+    int pos = 0;
+    end == -1 ? end = strlen(src) : 0;
+    for (int i = start; i < end; i++)
+        dst[pos++] = src[i];
+    dst[pos] = 0;
+    return 1;
+}
 
 //--------------------------------初始化--------------------------------
 
 // 初始化+格式化磁盘, 第一次运行程序的时候需执行, 之后执行加载磁盘
-int initialize(const char* path)
+int initialize(const char *path)
 {
     // 所有打开方式都是 "r+""
     // 没有写入的
     virtualDisk = fopen(path, "r+");
     memset(buf, 0, sizeof(buf));
     fwrite(buf, 1, TOTAL_SIZE, virtualDisk);
-    if(virtualDisk == NULL)
+    if (virtualDisk == NULL)
     {
         return ERROR_VM_NOEXIST;
     }
     // 格式化
     // superBlock初始化
-    superBlock = (struct SuperBlock*)calloc(1, sizeof(struct SuperBlock));
-    superBlock->size = 16*1024*1024;
+    superBlock = (struct SuperBlock *)calloc(1, sizeof(struct SuperBlock));
+    superBlock->size = 16 * 1024 * 1024;
     superBlock->start = START;
     superBlock->fileDirStart = FILE_DIR_START;
     superBlock->fileDirBitmapStart = FILE_DIR_BITMAP_START;
@@ -417,9 +419,9 @@ int initialize(const char* path)
     superBlock->freeInode = DISK_INODE_NUM - 1;
     superBlock->freeBlock = BLOCK_NUM;
     fseek(virtualDisk, 0, SEEK_SET);
-    
+
     // 根目录初始化
-    FileDirectory* root = (struct FileDirectory*)calloc(1, sizeof(FileDirectory));
+    FileDirectory *root = (struct FileDirectory *)calloc(1, sizeof(FileDirectory));
     root->fileDirNum = 0;
     char str[] = "/";
     strncpy(root->fileDirectoryName, str, sizeof(root->fileDirectoryName));
@@ -429,41 +431,40 @@ int initialize(const char* path)
     bitmapWrite(2); // 更新bitmap
 
     // blockBitmap初始化
-    for(int i=0; i<superBlock->blockStart; i++)
+    for (int i = 0; i < superBlock->blockStart; i++)
     {
-        blockBitmap[i/32] = setBitFromUint(blockBitmap[i/32], i%32, 1);
+        blockBitmap[i / 32] = setBitFromUint(blockBitmap[i / 32], i % 32, 1);
     }
     bitmapWrite(1);
 
-    
     // int ans = blockRead(superBlock, superBlock->start, 0, sizeof(struct SuperBlock), 1);
     // cout<<superBlock->size<<endl;  // 16777216
     // cout<<ans<<endl;  // 1
-    
+
     // fclose(virtualDisk);
     return NO_ERROR;
 }
 
 // 加载磁盘
-int loadVirtualDisk(const char* path)
+int loadVirtualDisk(const char *path)
 {
     virtualDisk = fopen(path, "r+");
-    if(virtualDisk == NULL)
+    if (virtualDisk == NULL)
     {
         return ERROR_VM_NOEXIST;
     }
     // 读入superBlock
-    superBlock = (struct SuperBlock*)calloc(1, sizeof(struct SuperBlock));
+    superBlock = (struct SuperBlock *)calloc(1, sizeof(struct SuperBlock));
     fseek(virtualDisk, START, SEEK_SET);
     int readSize = fread(superBlock, sizeof(struct SuperBlock), 1, virtualDisk);
-    if(readSize != 1)
+    if (readSize != 1)
     {
         return ERROR_LOAD_SUPER_FAIL;
     }
     // 读入文件目录表(根目录)
-    currFileDir = (struct FileDirectory*)calloc(1, sizeof(struct FileDirectory));
+    currFileDir = (struct FileDirectory *)calloc(1, sizeof(struct FileDirectory));
     blockRead(currFileDir, superBlock->fileDirStart, 0, sizeof(struct FileDirectory));
-    
+
     // 读入bitmap
     bitmapRead(0);
     bitmapRead(1);
@@ -471,8 +472,6 @@ int loadVirtualDisk(const char* path)
 
     return NO_ERROR;
 }
-
-
 
 //------------------------------输入的响应事件------------------------------
 

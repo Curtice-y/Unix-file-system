@@ -308,26 +308,16 @@ int allocateBlock(unsigned int inodeId, int fileSize)
     {
         return ERROR_INSUFFICIENT_FREE_BLOCKS;
     }
-<<<<<<< HEAD
     int blockNum = (fileSize+1023)/1024;
     for(int i=0;i<min(blockNum, 10);i++)
-=======
-
-    for (int i = 0; i < min(fileSize, 10); i++)
->>>>>>> ec015523d532d132c04453044716a71a54989cc5
     {
         unsigned int t = allocateOneBlock();
         inode->addr[i] = getAddressFromBlockId(t);
         // cout<<"the blockid "<<t<<endl;
         // cout<<getBlockIdFromAddress(inode->addr[i])<<endl;
     }
-<<<<<<< HEAD
     blockNum-=10;
     if (blockNum > 0)
-=======
-    fileSize -= 10;
-    if (fileSize > 0)
->>>>>>> ec015523d532d132c04453044716a71a54989cc5
     {
         unsigned int blockId = allocateOneBlock();
         // blockBitmap[blockId]=1;

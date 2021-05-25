@@ -34,7 +34,7 @@ struct DiskInode
 {
     int type;             // 文件类型
     unsigned int inodeId; // 索引节点id
-    int fileSize;         // 文件大小 
+    int fileSize;         // 文件大小
     Address addr[11];     // 物理地址 addr[0]~addr[9]是直接地址, addr[10]是间接地址
     int createTime;       // 创建时间
     int modifyTime;       // 修改时间
@@ -46,6 +46,7 @@ struct FileDirectoryEntry
 {
     char fileName[MAX_FILE_NAME]; // 文件名
     unsigned int id;              // 索引节点编号/文件夹
+    unsigned int parentId;
 };
 
 // 文件夹  max = 8 + 28*36(1004) + 4(?) + 8 = 1 Block

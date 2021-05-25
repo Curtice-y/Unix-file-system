@@ -1,4 +1,4 @@
-#define MAX_FILE_NAME 32
+#define MAX_FILE_NAME 28
 #define MAX_FILE_SIZE 351 * 1024
 #define MAX_DIR_NUM 128
 
@@ -37,3 +37,4 @@
 
 #define FILE_READ_OVERHEAD 14
 #define FILE_TOO_LARGE 15
+#define FILE_NOT_EXIST 16

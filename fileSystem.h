@@ -1381,6 +1381,20 @@ int dispatcher()
     {
         sumblock();
     }
+    else if (strcmp(command, "deleteFile") == 0)
+    {
+        strCpy(command, str, strlen(command) + 1);
+
+        strcat(ss, command);
+        deleteFile(ss);
+    }
+    else if (strcmp(command, "deleteDir") == 0)
+    {
+        strCpy(command, str, strlen(command) + 1);
+
+        strcat(ss, command);
+        deleteDir(ss);
+    }
 
     // deleteFile filename
     // createDir

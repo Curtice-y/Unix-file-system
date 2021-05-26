@@ -196,7 +196,7 @@ struct DiskInode *inodeGet(unsigned int inodeId)
     }
     if (diskInode->createTime == 0) // new file
     {
-        diskInode->fileSize = 0;
+        diskInode->fileSize = 50;
         diskInode->inodeId = inodeId;
         time_t timer;
         time(&timer);
@@ -733,8 +733,8 @@ FileDirectory *cd(char *path, FileDirectory *node)
     subStr(path, t, start, pos);
     FileDirectory *dir = (FileDirectory *)calloc(1, sizeof(FileDirectory));
     strcat(ss, t);
-
-    blockRead(dir, superBlock->fileDirStart + currFileDir->fileDirectoryId, 0, sizeof(FileDirectory));
+    cout<<ss<<endl;
+    blockRead(dir, superBlock->fileDirStart + node->fileDirectoryId, 0, sizeof(FileDirectory));
     for (int i = 0; i < dir->fileDirNum; i++)
     {
         if (dir->fileDirectoryEntry[i].fileName[0] == '/')
@@ -763,7 +763,6 @@ FileDirectory *cd(char *path, FileDirectory *node)
     {
         subStr(path, t, pos + 1);
         return cd(t, node);
-        cout << t << endl;
     }
     if (pos == -1)
 
@@ -854,6 +853,7 @@ int mkdir(char *filename)
     strcpy(newDir->fileDirectoryName, filename);
 
     dir->fileDirectoryEntry[dir->fileDirNum].id = newDir->fileDirectoryId;
+    dir->fileDirectoryEntry[dir->fileDirNum].parentId=currFileDir->fileDirectoryId;
     dir->fileDirNum += 1;
     cout << newDir->fileDirectoryId << endl;
     int c = blockWrite(dir, superBlock->fileDirStart + currFileDir->fileDirectoryId, 0, sizeof(FileDirectory));
@@ -970,18 +970,19 @@ int ls()
 {
     FileDirectory *dir = (FileDirectory *)calloc(1, sizeof(FileDirectory));
     blockRead(dir, superBlock->fileDirStart + currFileDir->fileDirectoryId, 0, sizeof(FileDirectory));
+    cout<<dir->fileDirNum<<endl;
     for (int i = 0; i < dir->fileDirNum; i++)
         if (dir->fileDirectoryEntry[i].fileName[0] == '/')
         {
             cout << dir->fileDirectoryEntry[i].fileName << " ";
         }
-
         else
         {
             DiskInode *ff = inodeGet(dir->fileDirectoryEntry->id);
             cout << " "
                  << "filename = " << dir->fileDirectoryEntry[i].fileName << " filesize :" << ff->fileSize << " createtime : " << ff->createTime << endl;
         }
+        cout<<endl;
 }
 
 // int type=currInode->type;
@@ -1018,7 +1019,7 @@ int createFile(char *filename, int filesize = 50)
 {
     int count = currFileDir->fileDirNum;
     FileDirectory *dir = (FileDirectory *)calloc(1, sizeof(FileDirectory));
-    blockRead(dir, superBlock->fileDirStart * 1024 + currFileDir->fileDirectoryId * 1024, 0, sizeof(FileDirectory));
+    blockRead(dir, superBlock->fileDirStart + currFileDir->fileDirectoryId, 0, sizeof(FileDirectory));
     for (int i = 0; i < dir->fileDirNum; i++)
     {
         if (strcmp(dir->fileDirectoryEntry[i].fileName, filename) == 0)
@@ -1054,8 +1055,8 @@ int createFile(char *filename, int filesize = 50)
     int e = updateInode(tmpnode); // 写入磁盘
     dir->fileDirNum += 1;
     dir->fileDirectoryEntry[dir->fileDirNum].id = id;
-    int c = blockWrite(dir, getBlockIdFromAddress(tmpnode->addr[0]), 0, sizeof(FileDirectory));
-    int d = blockWrite(dir, superBlock->fileDirStart * 1024 + currFileDir->fileDirectoryId * 1024, 0, sizeof(FileDirectory));
+     blockWrite(tmpnode, superBlock->inodeStart + (tmpnode->inodeId) / 16, (tmpnode->inodeId % 16) * 64, sizeof(struct DiskInode));
+    int d = blockWrite(dir, superBlock->fileDirStart+ currFileDir->fileDirectoryId, 0, sizeof(FileDirectory));
     return 1;
     // if(currInode->type/1000!=1){
     //     cout<<"current node is not a dir"<<endl;
@@ -1134,7 +1135,7 @@ int deleteFile(char *fileName)
 {
     int number = currFileDir->fileDirNum;
     for (int i = 0; i < number; ++i)
-    {
+    {   
         FileDirectoryEntry entry = currFileDir->fileDirectoryEntry[i];
         if (strcmp(entry.fileName, fileName) == 0)
         {
@@ -1143,7 +1144,7 @@ int deleteFile(char *fileName)
 
             //删掉这个inode
             blockWrite(inode, superBlock->inodeStart + (inode->inodeId) / 16, (inode->inodeId % 16) * 64, sizeof(struct DiskInode));
-
+            
             bitmapRead(0);
             inodeBitmap[inode->inodeId / 32] = setBitFromUint(inodeBitmap[inode->inodeId / 32], inode->inodeId % 32, 0);
             bitmapWrite(0);
@@ -1204,7 +1205,9 @@ int deleteDir(char *path)
 
             //回到上一级
             currFileDir = parentDir(backup);
-
+            currFileDir->fileDirectoryEntry[currFileDir->fileDirNum].id=0;
+            currFileDir->fileDirNum-=1;
+            blockWrite(currFileDir,superBlock->fileDirStart+ currFileDir->fileDirectoryId, 0, sizeof(FileDirectory));
             return NO_ERROR;
         }
     }
@@ -1312,7 +1315,6 @@ int dispatcher()
     char command[8192] = {0};
     char ss[20] = {'/'};
     char str[8192] = {0};
-    cout << currFileDir->fileDirectoryId;
     blockRead(currFileDir, superBlock->fileDirStart + currFileDir->fileDirectoryId, 0, sizeof(FileDirectory));
     // cout<<"[@localhost /"<<(currInode->inodeId == 0?"/":currFileDirEntry.fileName)<<"]#";
     cout << "[@localhost " << (currFileDir->fileDirectoryId == 0 ? "/" : currFileDir->fileDirectoryName) << "]#";
@@ -1330,14 +1332,14 @@ int dispatcher()
     strcpy(command, str); // 复制
     strtok(command, " "); // 用空格分割, 将空格换成'\0', '\0'是字符串结束的标志
 
-    if (strcmp(command, "createFile") == 0)
+    if (strcmp(command, "touch") == 0)
     {
         // createFile fileName fileSize
 
         strCpy(command, str, strlen(command) + 1);
         createFile(command);
     }
-    else if (strcmp(command, "changeDir") == 0)
+    else if (strcmp(command, "cd") == 0)
     {
         FileDirectory *inode = NULL, *ret = NULL;
         strCpy(command, str, strlen(command) + 1);
@@ -1357,11 +1359,11 @@ int dispatcher()
             // cout<<currInode->inodeId<<" "<<currInode->type<<endl;
         }
     }
-    else if (strcmp(command, "dir") == 0)
+    else if (strcmp(command, "ls") == 0)
     {
         ls();
     }
-    else if (strcmp(command, "createDir") == 0)
+    else if (strcmp(command, "mkdir") == 0)
     {
         strCpy(command, str, strlen(command) + 1);
 
@@ -1381,18 +1383,16 @@ int dispatcher()
     {
         sumblock();
     }
-    else if (strcmp(command, "deleteFile") == 0)
+    else if (strcmp(command, "deleteF") == 0)
     {
         strCpy(command, str, strlen(command) + 1);
-
-        strcat(ss, command);
-        deleteFile(ss);
+       
+        deleteFile(command);
     }
-    else if (strcmp(command, "deleteDir") == 0)
+    else if (strcmp(command, "delete") == 0)
     {
         strCpy(command, str, strlen(command) + 1);
-
-        strcat(ss, command);
+        strcat(ss,command);
         deleteDir(ss);
     }
 

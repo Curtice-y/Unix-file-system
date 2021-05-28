@@ -88,6 +88,20 @@ unsigned int setBitFromUint(unsigned int num, int leftPos, int bit)
     return utemp;
 }
 
+int charToInt(char* size)
+{
+    int len  = strlen(size);
+    int sum = 0;
+    int temp = 0;
+    for(int i=0;i<len;i++)
+    {
+        sum *= 10;
+        temp = (int)size[i] - 48;
+        sum += temp;
+    }
+    return sum;
+}
+
 //------------------------------bitmap操作------------------------------
 
 // kind=0 为inode,kind=1 为block
@@ -314,12 +328,12 @@ unsigned int allocateOneBlock()
         if (find == true)
             break;
     }
-    superBlock->freeBlock = superBlock->freeBlock - 1;
 }
 
 // 为inode对应文件分配block, 调用函数前需要设置inode的fileSize
 int allocateBlock(unsigned int inodeId, int fileSize)
 {
+    cout<<"inodeId: "<<inodeId<<endl;
     bitmapRead(1);
     struct DiskInode *inode = inodeGet(inodeId);
     inode->fileSize = fileSize;
@@ -328,16 +342,16 @@ int allocateBlock(unsigned int inodeId, int fileSize)
         return ERROR_INSUFFICIENT_FREE_BLOCKS;
     }
     int blockNum = (fileSize + 1023) / 1024;
+    superBlock->freeBlock = superBlock->freeBlock - blockNum;
     for (int i = 0; i < min(blockNum, 10); i++)
     {
         unsigned int t = allocateOneBlock();
         inode->addr[i] = getAddressFromBlockId(t);
-        // cout<<"the blockid "<<t<<endl;
-        // cout<<getBlockIdFromAddress(inode->addr[i])<<endl;
     }
     blockNum -= 10;
     if (blockNum > 0)
     {
+        superBlock->freeBlock-=1;
         unsigned int blockId = allocateOneBlock();
         // blockBitmap[blockId]=1;
         inode->addr[10] = getAddressFromBlockId(blockId);
@@ -352,6 +366,7 @@ int allocateBlock(unsigned int inodeId, int fileSize)
     }
     updateInode(inode);
     bitmapWrite(1);
+    blockWrite(superBlock, superBlock->start, 0, sizeof(struct SuperBlock), 1);
     return NO_ERROR;
 }
 
@@ -427,7 +442,7 @@ int initialize(const char *path)
     superBlock->entryNum = ENTRY_NUM;
     superBlock->diskInodeSize = DISK_INODE_SIZE;
     superBlock->freeInode = DISK_INODE_NUM - 1;
-    superBlock->freeBlock = BLOCK_NUM;
+    superBlock->freeBlock = BLOCK_NUM - 391;
 
     blockWrite(superBlock, superBlock->start, 0, sizeof(struct SuperBlock), 1);
 
@@ -475,13 +490,17 @@ int loadVirtualDisk(const char *path)
 
     // 读入文件目录表(根目录)
     currFileDir = (struct FileDirectory *)calloc(1, sizeof(struct FileDirectory));
-    int c = blockRead(currFileDir, superBlock->fileDirStart, 0, sizeof(struct FileDirectory));
-    cout << c << endl;
+    blockRead(currFileDir, superBlock->fileDirStart, 0, sizeof(struct FileDirectory));
+
 
     // 读入bitmap
     bitmapRead(0);
     bitmapRead(1);
     bitmapRead(2);
+
+    cout<<"Welcome!"<<endl;
+    cout<<"Your IDs: 0"<<endl;
+    cout<<"Your Names: root"<<endl;
 
     return NO_ERROR;
 }
@@ -769,156 +788,127 @@ FileDirectory *cd(char *path, FileDirectory *node)
     if (pos == -1)
 
         return node;
-    //     if(type/1000==1){ //inode
-    //         int count=node->fileSize/sizeof(FileDirectoryEntry);
-    //         int addnum = count / 28 + (count % 28 >= 1 ? 1 : 0);
-    //         FileDirectory* dir=(FileDirectory*)calloc(1,sizeof(FileDirectory));
-    //         if(addnum>8) addnum=8;
-    //         for(int add=0;add<addnum;add++){
-    //             blockRead(dir,getBlockIdFromAddress(node->addr[add]),0,sizeof(FileDirectory));
-    //             for(int i=0;i<dir->fileDirNum;i++){
-    //                 if(strcmp(dir->fileDirectoryEntry[i].fileName,t)==0){
-    //                     count=-1;
-    //                     currFileDirEntry=dir->fileDirectoryEntry[i];
-    //                     //DiskInode* tmpnode=inodeGet(dir->fileDirectoryEntry[i].inodeId);
-    //                     DiskInode* tmpnode=(DiskInode*)calloc(1,sizeof(DiskInode));
-    //                     fseek(virtualDisk, INODE_START*1024 + dir->fileDirectoryEntry[i].id*DISK_INODE_SIZE, SEEK_SET); // 指针移到对应inode的位置
-    //                     int readSize = fread(tmpnode, sizeof(struct DiskInode), 1, virtualDisk);
-    //                     cout<<tmpnode->inodeId<<endl;
-    //                     cout<<tmpnode->type<<endl;
-    //                     cout<<tmpnode->createTime<<endl;
-    //                     if(tmpnode->type/1000!=1){
-    //                         cout<<"this path is not a dir"<<endl;
-    //                         continue;
-    //                     }
-    //                     node=tmpnode;
-    //                     break;
-    //                 }
-    //             }if(count==-1)
-    //               break;
-
-    //         }if(count!=-1)
-    //           node=NULL;
-    //     }
-    //     else{
-    //         node=NULL;
-    //         return node;
-    //     }
-    //     if (pos != -1 && node != NULL)
-    //     {
-    // 	subStr(path, t, pos + 1);
-    // 	return cd(t, node);
-    //     }
-    // if (pos == -1)
-    // 	return node;
 }
 
-int mkdir(char *filename)
+int changeDir(char *path)
 {
-    // if(currInode->type/1000!=1){
-    //     cout<<"current node is not a dir"<<endl;
-    //     return NOT_A_DIR;
-    // }
-    // int count=currInode->fileSize/sizeof(FileDirectoryEntry);
-    // cout<<"the count ="<<count<<endl;
-    // if(count>252){
-    //     cout<<"can not make more dir in current dir"<<endl;
-    //     return CAN_NOT_MAKE_MORE_DIR;
-    // }
-    int count = currFileDir->fileDirNum;
-    FileDirectory *dir = (FileDirectory *)calloc(1, sizeof(FileDirectory));
-    blockRead(dir, superBlock->fileDirStart + currFileDir->fileDirectoryId, 0, sizeof(FileDirectory));
-    for (int i = 0; i < dir->fileDirNum; i++)
+    if(strcmp(path, "/") == 0)
     {
-        if (strcmp(dir->fileDirectoryEntry[i].fileName, filename) == 0)
-        {
-            cout.write(filename, strlen(filename));
-            cout << "it is exit in current directory" << endl;
-            return -1;
-        }
+        blockRead(currFileDir, superBlock->fileDirStart, 0, sizeof(struct FileDirectory), 1);
+        return NO_ERROR;
     }
-    int id = 1;
-    strcpy(dir->fileDirectoryEntry[dir->fileDirNum].fileName, filename);
-    //寻找到空闲的目录ID
-    for (int i = 0; i < 4; i++)
+    int backId = currFileDir->fileDirectoryId;
+    blockRead(currFileDir, superBlock->fileDirStart, 0, sizeof(struct FileDirectory), 1);
+    //cout<<currFileDir->fileDirectoryId<<endl;
+    char* token = strtok(path, "/");
+    int newId;
+    newId = -1;
+    char temp[35] = {'/'};
+    strcat(temp, token);
+    for(int i=0; i<currFileDir->fileDirNum; i++)
     {
-        if (dirInUse(i) == false)
+        if(strcmp(temp,currFileDir->fileDirectoryEntry[i].fileName) == 0)
         {
-            fileDirBitmap[i / 32] = setBitFromUint(fileDirBitmap[i / 32], i % 32, 1);
-            bitmapWrite(2);
-            id = i;
+            newId = currFileDir->fileDirectoryEntry[i].id;
             break;
         }
     }
-    FileDirectory *newDir = (FileDirectory *)calloc(1, sizeof(FileDirectory));
-    newDir->fileDirectoryId = id;
-    strcpy(newDir->fileDirectoryName, filename);
+    if(newId == -1)
+    {
+        cout<<"Input path not exist"<<endl;
+        blockRead(currFileDir, superBlock->fileDirStart + backId, 0, sizeof(struct FileDirectory), 1);
+        return ERROR_PATH_NOEXIST;
+    }
+    else
+    {
+        cout<<newId<<endl;
+        blockRead(currFileDir, superBlock->fileDirStart + newId, 0, sizeof(struct FileDirectory), 1);
+    }
 
-    dir->fileDirectoryEntry[dir->fileDirNum].id = newDir->fileDirectoryId;
-    dir->fileDirectoryEntry[dir->fileDirNum].parentId = currFileDir->fileDirectoryId;
-    dir->fileDirNum += 1;
-    cout << newDir->fileDirectoryId << endl;
-    int c = blockWrite(dir, superBlock->fileDirStart + currFileDir->fileDirectoryId, 0, sizeof(FileDirectory));
-    int d = blockWrite(newDir, superBlock->fileDirStart + newDir->fileDirectoryId, 0, sizeof(FileDirectory));
-    return 1;
+    while((token = strtok(NULL, "/")))
+    {
+        newId = -1;
+        char temp[35] = {'/'};
+        strcat(temp, token);
+        cout<<temp<<endl;
+        for(int i=0; i<currFileDir->fileDirNum; i++)
+        {
+            if(strcmp(temp,currFileDir->fileDirectoryEntry[i].fileName) == 0)
+            {
+                newId = currFileDir->fileDirectoryEntry[i].id;
+                break;
+            }
+        }
+        if(newId == -1)
+        {
+            cout<<"Input path not exist"<<endl;
+            blockRead(currFileDir, superBlock->fileDirStart + backId, 0, sizeof(struct FileDirectory), 1);
+            return ERROR_PATH_NOEXIST;
+        }
+        else
+        {
+            cout<<newId<<endl;
+            blockRead(currFileDir, superBlock->fileDirStart + newId, 0, sizeof(struct FileDirectory), 1);
+        }
+        token = strtok(NULL, "/");
+    }
+    return NO_ERROR;
+}
 
-    // int addnum = count / 28 + (count % 28 >= 1 ? 1 : 0);
-    // FileDirectory* dir=(FileDirectory*)calloc(1,sizeof(FileDirectory));
-    // if(addnum>8) addnum=8;
-    // for(int add=0;add<addnum;add++){
-    //     cout<<getBlockIdFromAddress(currInode->addr[add])<<endl;
-    //     blockRead(dir,getBlockIdFromAddress(currInode->addr[add]),0,sizeof(FileDirectory));
-    //     for(int i=0;i<dir->fileDirNum;i++)
-    //         if(strcmp(dir->fileDirectoryEntry[i].fileName,filename)==0){
-    //                  cout.write(filename, strlen(filename));
-    // 			     cout << " is exist in current dir!" << endl;
-    // 			     return -1;
-    //                 }
-    //     }
-    //     currInode->fileSize+=sizeof(currFileDirEntry);
-    //     updateInode(currInode);
-    //     int addr = count / 28;
-    //     // cout<<"the read address is "<<getBlockIdFromAddress(currInode->addr[addr])<<endl;
-    //     blockRead(dir,getBlockIdFromAddress(currInode->addr[addr]),0,sizeof(FileDirectoryEntry));
-    //     strcpy(dir->fileDirectoryEntry[dir->fileDirNum].fileName,filename);
-    //     //找到一个空闲的Inode，并创建
-    //     int id=1;
-    //     for(int i=0;i<superBlock->diskInodeNum;i++)
-    //     {
-    //         if(inodeInUse(i) == false)
-    //         {
-    //             inodeBitmap[i/32] = setBitFromUint(inodeBitmap[i/32], i%32, 1);
-    //             bitmapWrite(0);
-    //             allocateInode(i);
-    //             allocateBlock(i,50);
-    //             id=i;
-    //             break;
-    //         }
-    //     }
+int createDir(char *path)
+{
+    if(path[0] != '/')
+    {
+        char ss[35] = {"/"};
+        strcat(ss, path); // 加/
+        FileDirectory *dir = (FileDirectory *)calloc(1, sizeof(FileDirectory));
+        blockRead(dir, superBlock->fileDirStart + currFileDir->fileDirectoryId, 0, sizeof(FileDirectory));
+        for (int i = 0; i < dir->fileDirNum; i++)
+        {
+            if (strcmp(dir->fileDirectoryEntry[i].fileName, ss) == 0)
+            {
+                cout << "it is exit in current directory" << endl;
+                return -1;
+            }
+        }
+        int id = 1;
+        strcpy(dir->fileDirectoryEntry[dir->fileDirNum].fileName, ss);
+        //寻找到空闲的目录ID
+        for (int i = 0; i < 4; i++)
+        {
+            if (dirInUse(i) == false)
+            {
+                fileDirBitmap[i / 32] = setBitFromUint(fileDirBitmap[i / 32], i % 32, 1);
+                bitmapWrite(2);
+                id = i;
+                break;
+            }
+        }
+        FileDirectory *newDir = (FileDirectory *)calloc(1, sizeof(FileDirectory));
+        newDir->fileDirectoryId = id;
+        strcpy(newDir->fileDirectoryName, ss);
 
-    //     struct DiskInode* tmpnode=inodeGet(id);
-    //     tmpnode->inodeId = id;
-    //     tmpnode->type=1774;
-    //     time_t timer;
-    //     time(&timer);
-    //     count++;
-    //     tmpnode->createTime = timer;
-    //     int e=updateInode(tmpnode);   // 写入磁盘
-    //     cout<<"the iresult is "<<e<<endl;
-    //     // cout<<"the bitmap number"<<id<<endl;
-
-    //     dir->fileDirectoryEntry[dir->fileDirNum].id=tmpnode->inodeId;
-    //     // cout<<dir->fileDirectoryEntry[dir->directoryNum].fileName<<endl;
-    //     dir->fileDirNum+=1;
-    //     for(int i=0;i<dir->fileDirNum;i++){
-    //         cout<<dir->fileDirectoryEntry[i].fileName<<" "<<dir->fileDirectoryEntry[i].id<<endl;
-    //     }
-    //     fseek(virtualDisk, 0, SEEK_SET);
-    //     // cout<<"the address is "<<getBlockIdFromAddress(currInode->addr[addr])<<endl;
-    //     int d=blockWrite(dir,getBlockIdFromAddress(tmpnode->addr[addr]),0,sizeof(FileDirectory));
-    //     // int c=blockWrite(dir,getBlockIdFromAddress(currInode->addr[addr]),0,sizeof(FileDirectory));
-    //     // cout<<"the result of the blockwrite "<<c<<endl;
-    //     return 1;
+        dir->fileDirectoryEntry[dir->fileDirNum].id = newDir->fileDirectoryId;
+        dir->fileDirectoryEntry[dir->fileDirNum].parentId = currFileDir->fileDirectoryId;
+        dir->fileDirNum += 1;
+        //cout << newDir->fileDirectoryId << endl;
+        int c = blockWrite(dir, superBlock->fileDirStart + currFileDir->fileDirectoryId, 0, sizeof(FileDirectory));
+        int d = blockWrite(newDir, superBlock->fileDirStart + newDir->fileDirectoryId, 0, sizeof(FileDirectory));
+    }
+    else
+    {
+        changeDir(path);
+        char* fileName;
+        char* temp;
+        temp = strtok(path, "/");
+        fileName = temp;
+        while((temp = strtok(NULL, "/")))
+        {
+            fileName = temp;
+        }
+        createDir(fileName);
+    }
+    return NO_ERROR;
 }
 
 int cat(char *filename)
@@ -1026,6 +1016,7 @@ int createFile(char *filename, int filesize = 50)
     }
 
     struct DiskInode *tmpnode = inodeGet(id);
+    tmpnode->fileSize = filesize;
     allocateBlock(id, filesize);
     allocateInode(id);
     tmpnode->inodeId = id;
@@ -1042,69 +1033,6 @@ int createFile(char *filename, int filesize = 50)
     blockWrite(tmpnode, superBlock->inodeStart + (tmpnode->inodeId) / 16, (tmpnode->inodeId % 16) * 64, sizeof(struct DiskInode));
     int d = blockWrite(dir, superBlock->fileDirStart + currFileDir->fileDirectoryId, 0, sizeof(FileDirectory));
     return 1;
-    // if(currInode->type/1000!=1){
-    //     cout<<"current node is not a dir"<<endl;
-    //     return NOT_A_DIR;
-    // }
-
-    // int count=currInode->fileSize/sizeof(FileDirectoryEntry);
-    // if(count>252){
-    //     cout<<"can not make more dir in current dir"<<endl;
-    //     return CAN_NOT_MAKE_MORE_DIR;
-    // }
-    // int addnum = count / 28 + (count % 28 >= 1 ? 1 : 0);
-    // FileDirectory* dir=(FileDirectory*)calloc(1,sizeof(FileDirectory));
-    // if(addnum>8) addnum=8;
-    // for(int add=0;add<addnum;add++){
-    //     blockRead(dir,getBlockIdFromAddress(currInode->addr[add]),0,sizeof(FileDirectory));
-    //     for(int i=0;i<dir->fileDirNum;i++)
-    //         if(strcmp(dir->fileDirectoryEntry[i].fileName,filename)==0){
-    //                  cout.write(filename, strlen(filename));
-    // 			     cout << " is exist in current dir!" << endl;
-    // 			     return -1;
-    //                 }
-    //     }
-    //     currInode->fileSize+=sizeof(currFileDirEntry);
-    //     updateInode(currInode);
-    //     int addr = count / 4096;
-    //     blockRead(dir,getBlockIdFromAddress(currInode->addr[addr]),0,sizeof(FileDirectoryEntry));
-    //     strcpy(dir->fileDirectoryEntry[dir->fileDirNum].fileName,filename);
-    //     //找到一个空闲的Inode，并创建
-    // int id;
-    // for(int i=1;i<256;i++)
-    //     if(inodeBitmap[i]==0) {
-    //         id=i;
-    //         inodeBitmap[i]=1;
-    //         allocateInode(id);
-    //         allocateBlock(id,100);
-    //         break;
-    //     }
-    //     DiskInode* tmpnode = (struct DiskInode*)calloc(1, sizeof(DiskInode));
-    //     tmpnode->fileSize = 100;
-    //     tmpnode->inodeId = id;
-    //     tmpnode->type=2774;
-    //     time_t timer;
-    //     time(&timer);
-    //     tmpnode->createTime = timer;
-    //     updateInode(tmpnode);   // 写入磁盘
-
-    //     dir->fileDirectoryEntry[dir->fileDirNum].inodeId=tmpnode->inodeId;
-    //     // cout<<dir->fileDirectoryEntry[dir->directoryNum].fileName<<endl;
-    //     dir->fileDirNum+=1;
-    //     cout<<getBlockIdFromAddress(currInode->addr[addr])<<endl;
-    //     fseek(virtualDisk, 0, SEEK_SET);
-    //     int c=blockWrite(dir,getBlockIdFromAddress(currInode->addr[addr]),0,sizeof(FileDirectory), 1);
-    //     // cout<<sizeof(FileDirectory)<<endl;
-    //     // int writeSize = fwrite(dir, 1, sizeof(FileDirectory), virtualDisk);
-    //     // cout<<"WSize "<<writeSize<<endl;
-    //     // dir->directoryNum+=1;
-    //     // struct FileDirectory* d=(struct FileDirectory*)calloc(1, sizeof(struct FileDirectory));
-    //     // int b=blockRead(d,getBlockIdFromAddress(currInode->addr[0]), 0, sizeof(FileDirectory), 1);
-    //     //cout<<"secondtime"<<dir->fileDirectoryEntry[dir->directoryNum-1].fileName<<endl;
-    //     //cout<<d->directoryNum<<endl;
-    //     //cout<<b<<endl;
-    //     //cout<<c<<endl;
-    //     return 1;
 }
 
 int sumblock()
@@ -1203,6 +1131,7 @@ int deleteDir(char *path)
 
     return FILE_NOT_EXIST;
 }
+
 //展示该目录下的文件
 int ls()
 {
@@ -1222,18 +1151,23 @@ int ls()
         }
 }
 
+// copy file1 to file2
+int cp(char* file1, char* file2)
+{
+    cout<<"aa"<<endl;
+}
 
 
 // 解析输入
 int dispatcher()
 {
     // 补充welcome message, group info(names and IDs), copyright
-    char command[8192] = {0};
+    char* command;
     char ss[20] = {'/'};
     char str[8192] = {0};
     blockRead(currFileDir, superBlock->fileDirStart + currFileDir->fileDirectoryId, 0, sizeof(FileDirectory));
     // cout<<"[@localhost /"<<(currInode->inodeId == 0?"/":currFileDirEntry.fileName)<<"]#";
-    cout << "[@localhost " << (currFileDir->fileDirectoryId == 0 ? "/" : currFileDir->fileDirectoryName) << "]#";
+    cout<<endl << "[@localhost " << (currFileDir->fileDirectoryId == 0 ? "/" : currFileDir->fileDirectoryName) << "]#";
     char ch = getchar();
     int num = 0;
     if (ch == 10) // 换行符的ACSII是10 '\n'
@@ -1244,21 +1178,25 @@ int dispatcher()
         ch = getchar();
         num++;
     }
-    strlwr(str);          // 大写字母转为小写字母
-    strcpy(command, str); // 复制
-    strtok(command, " "); // 用空格分割, 将空格换成'\0', '\0'是字符串结束的标志
+    command = strtok(str, " "); // 用空格分割, 将空格换成'\0', '\0'是字符串结束的标志
+    //printf("%s\n", command);
 
-    if (strcmp(command, "touch") == 0)
+    if (strcmp(command, "createFile") == 0)
     {
         // createFile fileName fileSize
-
-        strCpy(command, str, strlen(command) + 1);
-        createFile(command);
+        //printf("%s\n", &command);
+        char* fileName = strtok(NULL, " ");
+        char* fileSize = strtok(NULL, " ");
+        if(fileSize == NULL)
+        {
+            createFile(fileName);
+        }
+        createFile(fileName, charToInt(fileSize));
     }
     else if (strcmp(command, "cd") == 0)
     {
         FileDirectory *inode = NULL, *ret = NULL;
-        strCpy(command, str, strlen(command) + 1);
+        command = strtok(NULL, " ");
         if (command[0] == '/')
             inode = root;
         else
@@ -1270,25 +1208,25 @@ int dispatcher()
         {
             currFileDir = ret;
             cout << currFileDir->fileDirectoryName << " " << currFileDir->fileDirectoryId << endl;
-
-            // updateInode(currInode);
-            // cout<<currInode->inodeId<<" "<<currInode->type<<endl;
         }
     }
-    else if (strcmp(command, "ls") == 0)
+    else if (strcmp(command, "dir") == 0)
     {
         ls();
     }
-    else if (strcmp(command, "mkdir") == 0)
+    else if(strcmp(command, "changeDir") == 0)
     {
-        strCpy(command, str, strlen(command) + 1);
-
-        strcat(ss, command);
-        mkdir(ss);
+        command = strtok(NULL, " ");
+        changeDir(command);
+    }
+    else if (strcmp(command, "createDir") == 0)
+    {
+        command = strtok(NULL, " ");
+        createDir(command);
     }
     else if (strcmp(command, "cat") == 0)
     {
-        strCpy(command, str, strlen(command) + 1);
+        command = strtok(NULL, " ");
         cat(command);
     }
     else if (strcmp(command, "sum") == 0)
@@ -1299,19 +1237,32 @@ int dispatcher()
     {
         sumblock();
     }
-    else if (strcmp(command, "df") == 0)
+    else if (strcmp(command, "deleteFile") == 0)
     {
-        strCpy(command, str, strlen(command) + 1);
-
+        command = strtok(NULL, " ");
         deleteFile(command);
         cout<<"call deleteF"<<endl;
     }
-    else if (strcmp(command, "delete") == 0)
+    else if (strcmp(command, "deleteDir") == 0)
     {
-        strCpy(command, str, strlen(command) + 1);
+        command = strtok(NULL, " ");
         strcat(ss, command);
         deleteDir(ss);
         cout<<"call delete"<<endl;
+    }
+    else if (strcmp(command, "cp") == 0)
+    {
+        char* file1 = strtok(NULL, " ");
+        char* file2 = strtok(NULL, " ");
+        char buff[90] = {"asfsg"};
+        char bufff[90];
+        //cout<<buff<<endl;
+        //cout<<sizeof(buff)<<endl; 50
+        struct DiskInode *temp = inodeGet(1);
+        cout<<temp->fileSize<<endl;
+        fileWrite(temp, buff, sizeof(buff));
+        fileRead(temp, bufff, 0, 1);
+        cout<<bufff<<endl;
     }
 
     // deleteFile filename

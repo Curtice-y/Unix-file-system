@@ -49,11 +49,19 @@ struct FileDirectoryEntry
     unsigned int parentId;
 };
 
-// 文件夹  max = 8 + 28*36(1004) + 4(?) + 8 = 1 Block
+// 文件夹  max = 8 + 27*36(1004) + 4(?) + 8 = 1 Block
 struct FileDirectory
 {
     int fileDirNum;                                   // 包含的文件/目录数量
     unsigned int fileDirectoryId;                     // 文件目录Id
+    unsigned int parentDirId;                         
     FileDirectoryEntry fileDirectoryEntry[ENTRY_NUM]; // 目录项数组
-    char fileDirectoryName[8];                        // 填充
+    char fileDirectoryName[8];                        // 目录名
+    char fill[32];                                    // 填充
+};
+
+
+struct Path
+{
+    char dirName[32];
 };

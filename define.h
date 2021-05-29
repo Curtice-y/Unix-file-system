@@ -16,7 +16,7 @@
 #define BLOCK_SIZE 1024
 
 #define DISK_INODE_NUM 1024 * 4
-#define ENTRY_NUM 28
+#define ENTRY_NUM 27
 #define DISK_INODE_SIZE 64
 
 #define NO_ERROR 1

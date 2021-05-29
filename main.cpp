@@ -1,5 +1,6 @@
 #include <iostream>
 #include <stdio.h>
+#include <Windows.h>
 
 #include "fileSystem.h"
 
@@ -9,7 +10,7 @@ int main()
 {   
     const char *path = "vm.dat";
     ///* 第一次运行时需要初始化
-    //initialize(path);
+    initialize(path);
     loadVirtualDisk(path);
     while (!logout)
     {
